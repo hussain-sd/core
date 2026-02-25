@@ -15,6 +15,7 @@ use SmartTill\Core\Filament\Forms\Components\ProductSearchInput;
 use SmartTill\Core\Models\Supplier;
 use SmartTill\Core\Models\Unit;
 use SmartTill\Core\Models\Variation;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 
 class PurchaseOrderForm
 {
@@ -326,7 +327,7 @@ class PurchaseOrderForm
                                             $store = Filament::getTenant();
                                             $barcode = $variation->stocks()->latest('id')->first();
                                             $taxPercent = $store?->getEffectiveTaxPercentage($barcode) ?? 0;
-                                            $taxAmount = $store?->getEffectiveTaxAmount($barcode, $roundedDisplayPrice) ?? 0;
+                                            $taxAmount = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $barcode, $roundedDisplayPrice);
 
                                             if ($taxPercent > 0) {
                                                 $set('requested_tax_percentage', $taxPercent);
@@ -417,7 +418,7 @@ class PurchaseOrderForm
                                                 // Initialize from stock only if no tax input exists
                                                 $barcode = $variation?->stocks()->latest('id')->first();
                                                 $taxPercent = $store?->getEffectiveTaxPercentage($barcode) ?? 0;
-                                                $taxAmount = $store?->getEffectiveTaxAmount($barcode, $unitPrice) ?? 0;
+                                                $taxAmount = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $barcode, $unitPrice);
 
                                                 if ($taxPercent > 0 && $store?->tax_enabled) {
                                                     $set('requested_tax_percentage', $taxPercent);

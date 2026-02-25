@@ -14,6 +14,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use SmartTill\Core\Enums\PrintOption;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 
 class ReceiptSettings extends Page
 {
@@ -44,11 +45,12 @@ class ReceiptSettings extends Page
 
         /** @var Store $store */
         $store = Filament::getTenant();
+        $settingsService = app(CoreStoreSettingsService::class);
 
         $this->form->fill([
-            'receipt_format' => $store->default_print_option->value,
-            'show_decimals_in_total' => $store->show_decimals_in_receipt_total,
-            'show_differences' => $store->show_differences_in_receipt,
+            'receipt_format' => $settingsService->getReceiptFormat($store),
+            'show_decimals_in_total' => $settingsService->getShowDecimalsInReceiptTotal($store),
+            'show_differences' => $settingsService->getShowDifferencesInReceipt($store),
         ]);
     }
 
@@ -82,10 +84,11 @@ class ReceiptSettings extends Page
         /** @var Store $store */
         $store = Filament::getTenant();
         $data = $this->form->getState();
+        $settingsService = app(CoreStoreSettingsService::class);
 
-        $store->setSetting(Store::SETTING_RECEIPT_FORMAT, $data['receipt_format'], 'dropdown');
-        $store->setSetting(Store::SETTING_RECEIPT_SHOW_DECIMALS_IN_TOTAL, (bool) $data['show_decimals_in_total'], 'dropdown');
-        $store->setSetting(Store::SETTING_RECEIPT_SHOW_DIFFERENCES, (bool) $data['show_differences'], 'dropdown');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_FORMAT, $data['receipt_format'], 'dropdown');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_SHOW_DECIMALS_IN_TOTAL, (bool) $data['show_decimals_in_total'], 'dropdown');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_SHOW_DIFFERENCES, (bool) $data['show_differences'], 'dropdown');
 
         Notification::make()
             ->title('Receipt settings saved')

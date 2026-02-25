@@ -27,6 +27,7 @@ use SmartTill\Core\Models\Sale;
 use SmartTill\Core\Models\SalePreparableItem;
 use SmartTill\Core\Models\Stock;
 use SmartTill\Core\Models\Variation;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 use SmartTill\Core\Services\SaleTransactionService;
 use Throwable;
 
@@ -2945,7 +2946,7 @@ class SaleForm
             $discountAmount = round($basePrice - $salePrice, 2);
 
             $store = Filament::getTenant();
-            $effectiveTax = $store?->getEffectiveTaxAmount($barcode, $basePrice) ?? 0;
+            $effectiveTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $barcode, $basePrice);
 
             $variations[] = [
                 'variation_id' => $variation->id,
@@ -3093,7 +3094,7 @@ class SaleForm
                         if ($barcode) {
                             $store = Filament::getTenant();
                             $unitPrice = (float) ($item['unit_price'] ?? 0);
-                            $effectiveTax = $store?->getEffectiveTaxAmount($barcode, $unitPrice) ?? 0;
+                            $effectiveTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $barcode, $unitPrice);
                             $item['tax'] = round($effectiveTax, 2);
                         }
                     }
@@ -3122,7 +3123,7 @@ class SaleForm
                 $take = min($remaining, $available);
                 $store = Filament::getTenant();
                 $unitPrice = (float) ($item['unit_price'] ?? 0);
-                $effectiveTax = $store?->getEffectiveTaxAmount($barcode, $unitPrice) ?? 0;
+                $effectiveTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $barcode, $unitPrice);
 
                 $line = $item;
                 $line['stock_id'] = $barcode->id;
@@ -3139,7 +3140,7 @@ class SaleForm
                 if ($fallbackBarcode) {
                     $store = Filament::getTenant();
                     $unitPrice = (float) ($item['unit_price'] ?? 0);
-                    $effectiveTax = $store?->getEffectiveTaxAmount($fallbackBarcode, $unitPrice) ?? 0;
+                    $effectiveTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $fallbackBarcode, $unitPrice);
 
                     $line = $item;
                     $line['stock_id'] = $fallbackBarcode->id;
@@ -3464,7 +3465,7 @@ class SaleForm
                             $stock = Stock::find($variation['stock_id']);
                             if ($stock) {
                                 $unitPrice = (float) ($variation['unit_price'] ?? 0);
-                                $taxValue = $sale->store->getEffectiveTaxAmount($stock, $unitPrice) ?? 0;
+                                $taxValue = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($sale->store, $stock, $unitPrice);
                             }
                         }
 
@@ -3663,7 +3664,7 @@ class SaleForm
 
                                 // Calculate tax similar to regular variations - use effective tax amount (0 if taxes disabled)
                                 $store = Filament::getTenant();
-                                $lineTax = $store?->getEffectiveTaxAmount($stock, $unitPrice) ?? 0;
+                                $lineTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
 
                                 SalePreparableItem::create([
                                     'sale_id' => $sale->id,
@@ -3801,7 +3802,7 @@ class SaleForm
                             $stock = Stock::find($variation['stock_id']);
                             if ($stock) {
                                 $unitPrice = (float) ($variation['unit_price'] ?? 0);
-                                $taxValue = $sale->store->getEffectiveTaxAmount($stock, $unitPrice) ?? 0;
+                                $taxValue = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($sale->store, $stock, $unitPrice);
                             }
                         }
 
@@ -3956,7 +3957,7 @@ class SaleForm
 
                                 // Calculate tax similar to regular variations - use effective tax amount (0 if taxes disabled)
                                 $store = Filament::getTenant();
-                                $lineTax = $store?->getEffectiveTaxAmount($stock, $unitPrice) ?? 0;
+                                $lineTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
 
                                 SalePreparableItem::create([
                                     'sale_id' => $sale->id,

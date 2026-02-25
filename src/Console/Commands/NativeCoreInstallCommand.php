@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 use SmartTill\Core\Services\CoreAccessBootstrapService;
 use SmartTill\Core\Services\CoreGeoBootstrapService;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 use SmartTill\Core\Services\CoreUnitBootstrapService;
 
 class NativeCoreInstallCommand extends Command
@@ -53,6 +54,9 @@ class NativeCoreInstallCommand extends Command
 
         $this->info('Bootstrapping countries, currencies, and timezones on nativephp...');
         app(CoreGeoBootstrapService::class)->ensureGeoData('nativephp');
+
+        $this->info('Bootstrapping store settings on nativephp...');
+        app(CoreStoreSettingsService::class)->ensureDefaultsForAllStores('nativephp');
 
         $this->info('Bootstrapping universal units on nativephp...');
         app(CoreUnitBootstrapService::class)->ensureUnitData('nativephp');

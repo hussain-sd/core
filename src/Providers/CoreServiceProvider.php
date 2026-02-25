@@ -30,6 +30,8 @@ use SmartTill\Core\Observers\UnitObserver;
 use SmartTill\Core\Observers\VariationObserver;
 use SmartTill\Core\Services\CoreAccessBootstrapService;
 use SmartTill\Core\Services\CoreGeoBootstrapService;
+use SmartTill\Core\Services\CoreStoreSettingsService;
+use SmartTill\Core\Services\CoreUnitBootstrapService;
 use SmartTill\Core\Models\Role;
 
 class CoreServiceProvider extends ServiceProvider
@@ -38,6 +40,8 @@ class CoreServiceProvider extends ServiceProvider
     {
         $this->app->singleton(CoreAccessBootstrapService::class, CoreAccessBootstrapService::class);
         $this->app->singleton(CoreGeoBootstrapService::class, CoreGeoBootstrapService::class);
+        $this->app->singleton(CoreStoreSettingsService::class, CoreStoreSettingsService::class);
+        $this->app->singleton(CoreUnitBootstrapService::class, CoreUnitBootstrapService::class);
 
         $this->commands([
             CoreInstallCommand::class,

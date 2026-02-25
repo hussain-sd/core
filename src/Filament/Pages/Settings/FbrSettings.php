@@ -14,6 +14,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use SmartTill\Core\Enums\FbrEnvironment;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 
 class FbrSettings extends Page
 {
@@ -44,12 +45,13 @@ class FbrSettings extends Page
 
         /** @var Store $store */
         $store = Filament::getTenant();
+        $settingsService = app(CoreStoreSettingsService::class);
 
         $this->form->fill([
-            'fbr_environment' => $store->fbr_environment->value,
-            'fbr_sandbox_pos_id' => $store->fbr_sandbox_pos_id,
-            'fbr_pos_id' => $store->fbr_pos_id,
-            'fbr_bearer_token' => $store->fbr_bearer_token,
+            'fbr_environment' => $settingsService->getFbrEnvironment($store),
+            'fbr_sandbox_pos_id' => $settingsService->getFbrSandboxPosId($store),
+            'fbr_pos_id' => $settingsService->getFbrPosId($store),
+            'fbr_bearer_token' => $settingsService->getFbrBearerToken($store),
         ]);
     }
 
@@ -100,10 +102,11 @@ class FbrSettings extends Page
 
         $data = $this->form->getState();
 
-        $store->setSetting(Store::SETTING_FBR_ENVIRONMENT, $data['fbr_environment'], 'dropdown');
-        $store->setSetting(Store::SETTING_FBR_SANDBOX_POS_ID, $data['fbr_sandbox_pos_id'] ?? null, 'number');
-        $store->setSetting(Store::SETTING_FBR_POS_ID, $data['fbr_pos_id'] ?? null, 'number');
-        $store->setSetting(Store::SETTING_FBR_BEARER_TOKEN, $data['fbr_bearer_token'] ?? null, 'text_area');
+        $settingsService = app(CoreStoreSettingsService::class);
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_FBR_ENVIRONMENT, $data['fbr_environment'], 'dropdown');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_FBR_SANDBOX_POS_ID, $data['fbr_sandbox_pos_id'] ?? null, 'number');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_FBR_POS_ID, $data['fbr_pos_id'] ?? null, 'number');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_FBR_BEARER_TOKEN, $data['fbr_bearer_token'] ?? null, 'text_area');
 
         Notification::make()
             ->title('FBR settings saved')

@@ -12,6 +12,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
+use SmartTill\Core\Services\CoreStoreSettingsService;
 
 class TaxSettings extends Page
 {
@@ -42,9 +43,10 @@ class TaxSettings extends Page
 
         /** @var Store $store */
         $store = Filament::getTenant();
+        $settingsService = app(CoreStoreSettingsService::class);
 
         $this->form->fill([
-            'tax_enabled' => $store->tax_enabled,
+            'tax_enabled' => $settingsService->isTaxEnabled($store),
         ]);
     }
 
@@ -71,7 +73,12 @@ class TaxSettings extends Page
         $store = Filament::getTenant();
         $data = $this->form->getState();
 
-        $store->setSetting(Store::SETTING_TAX_ENABLED, (bool) $data['tax_enabled'], 'dropdown');
+        app(CoreStoreSettingsService::class)->setSetting(
+            $store,
+            CoreStoreSettingsService::SETTING_TAX_ENABLED,
+            (bool) $data['tax_enabled'],
+            'dropdown'
+        );
 
         Notification::make()
             ->title('Tax settings saved')
