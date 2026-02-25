@@ -986,12 +986,12 @@ class SaleTransactionService
                         if ($oldCashTransaction->type === CashTransactionType::SalePaid->value) {
                             // Was added, so subtract
                             if ($oldAmount > 0) {
-                                $user->decrementCashInHandForStore($sale->store_id, $oldAmount);
+                                app(UserStoreCashService::class)->decrementCashInHandForStore($user, $sale->store_id, $oldAmount);
                             }
                         } else {
                             // Was subtracted (cancelled/refunded), so add back
                             if ($oldAmount > 0) {
-                                $user->incrementCashInHandForStore($sale->store_id, $oldAmount);
+                                app(UserStoreCashService::class)->incrementCashInHandForStore($user, $sale->store_id, $oldAmount);
                             }
                         }
 

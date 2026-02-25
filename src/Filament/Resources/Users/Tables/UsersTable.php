@@ -18,6 +18,7 @@ use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use SmartTill\Core\Services\CashService;
+use SmartTill\Core\Services\UserStoreCashService;
 
 class UsersTable
 {
@@ -63,14 +64,14 @@ class UsersTable
                             return 0;
                         }
 
-                        return $record->getCashInHandForStore($store);
+                        return app(UserStoreCashService::class)->getCashInHandForStore($record, $store);
                     })
                     ->color(function ($record) {
                         $store = \Filament\Facades\Filament::getTenant();
                         if (! $store) {
                             return 'gray';
                         }
-                        $cashInHand = $record->getCashInHandForStore($store);
+                        $cashInHand = app(UserStoreCashService::class)->getCashInHandForStore($record, $store);
 
                         return $cashInHand > 0 ? 'success' : 'gray';
                     }),
@@ -116,7 +117,7 @@ class UsersTable
                                 return false;
                             }
 
-                            return $record->getCashInHandForStore($store) > 0;
+                            return app(UserStoreCashService::class)->getCashInHandForStore($record, $store) > 0;
                         })
                         ->authorize(fn ($record) => self::canManageUserRecord($record) && \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Collect Cash from Users'))
                         ->requiresConfirmation()
@@ -126,7 +127,7 @@ class UsersTable
                             if (! $store) {
                                 return "Collect cash from {$record->name}.";
                             }
-                            $cashInHand = $record->getCashInHandForStore($store);
+                            $cashInHand = app(UserStoreCashService::class)->getCashInHandForStore($record, $store);
 
                             return "Collect cash from {$record->name}. Current cash in hand: ".number_format($cashInHand, 2).' PKR';
                         })

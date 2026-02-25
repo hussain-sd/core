@@ -54,8 +54,10 @@ class CashService
 
         try {
             DB::transaction(function () use ($user, $sale, $amount) {
+                $userStoreCashService = app(UserStoreCashService::class);
+
                 // Get current cash in hand for this store
-                $currentBalance = $user->getCashInHandForStore($sale->store_id);
+                $currentBalance = $userStoreCashService->getCashInHandForStore($user, $sale->store_id);
                 $newBalance = $currentBalance + $amount;
 
                 // Check if cash transaction already exists to prevent duplicates
@@ -75,7 +77,7 @@ class CashService
                 }
 
                 // Update user's cash in hand for this store
-                $user->incrementCashInHandForStore($sale->store_id, $amount);
+                $userStoreCashService->incrementCashInHandForStore($user, $sale->store_id, $amount);
 
                 // Create cash transaction record
                 CashTransaction::create([
@@ -141,8 +143,10 @@ class CashService
 
         try {
             DB::transaction(function () use ($user, $payment, $amount) {
+                $userStoreCashService = app(UserStoreCashService::class);
+
                 // Get current cash in hand for this store
-                $currentBalance = $user->getCashInHandForStore($payment->store_id);
+                $currentBalance = $userStoreCashService->getCashInHandForStore($user, $payment->store_id);
                 $newBalance = $currentBalance + $amount;
 
                 // Check if cash transaction already exists to prevent duplicates
@@ -162,7 +166,7 @@ class CashService
                 }
 
                 // Update user's cash in hand for this store
-                $user->incrementCashInHandForStore($payment->store_id, $amount);
+                $userStoreCashService->incrementCashInHandForStore($user, $payment->store_id, $amount);
 
                 // Create cash transaction record
                 CashTransaction::create([
@@ -229,8 +233,10 @@ class CashService
 
         try {
             DB::transaction(function () use ($user, $sale, $amount) {
+                $userStoreCashService = app(UserStoreCashService::class);
+
                 // Get current cash in hand for this store
-                $currentBalance = $user->getCashInHandForStore($sale->store_id);
+                $currentBalance = $userStoreCashService->getCashInHandForStore($user, $sale->store_id);
                 $newBalance = max(0, $currentBalance - $amount); // Ensure balance doesn't go negative
 
                 // Determine transaction type
@@ -260,7 +266,7 @@ class CashService
 
                 // Update user's cash in hand for this store
                 if ($decrementAmount > 0) {
-                    $user->decrementCashInHandForStore($sale->store_id, $decrementAmount);
+                    $userStoreCashService->decrementCashInHandForStore($user, $sale->store_id, $decrementAmount);
                 }
 
                 // Create cash transaction record
@@ -305,6 +311,8 @@ class CashService
 
         try {
             return DB::transaction(function () use ($user, $collectedBy, $note, $store) {
+                $userStoreCashService = app(UserStoreCashService::class);
+
                 // Get store from parameter, Filament context, or user's first store
                 $targetStore = $store ?? \Filament\Facades\Filament::getTenant() ?? $user->stores()->first();
 
@@ -315,7 +323,7 @@ class CashService
                 }
 
                 // Get current cash in hand for this store
-                $currentBalance = $user->getCashInHandForStore($targetStore);
+                $currentBalance = $userStoreCashService->getCashInHandForStore($user, $targetStore);
 
                 if ($currentBalance <= 0) {
                     $error = "User {$user->id} has no cash to collect for store {$targetStore->id} (balance: {$currentBalance})";
@@ -324,7 +332,7 @@ class CashService
                 }
 
                 // Reset user's cash in hand to 0 for this store
-                $user->updateCashInHandForStore($targetStore, 0);
+                $userStoreCashService->updateCashInHandForStore($user, $targetStore, 0);
 
                 // Create cash transaction record
                 $cashTransaction = CashTransaction::create([
