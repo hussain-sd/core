@@ -5,6 +5,7 @@ namespace SmartTill\Core\Providers;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
 use SmartTill\Core\Console\Commands\CoreInstallCommand;
+use SmartTill\Core\Console\Commands\NativeCoreInstallCommand;
 use SmartTill\Core\Models\Attribute;
 use SmartTill\Core\Models\Payment;
 use SmartTill\Core\Models\Product;
@@ -31,6 +32,7 @@ class CoreServiceProvider extends ServiceProvider
 
         $this->commands([
             CoreInstallCommand::class,
+            NativeCoreInstallCommand::class,
         ]);
     }
 

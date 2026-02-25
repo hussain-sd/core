@@ -12,17 +12,19 @@ use SmartTill\Core\Support\CorePermissionCatalog;
 
 class CoreAccessBootstrapService
 {
-    public function ensureCoreAccess(): void
+    public function ensureCoreAccess(?string $connection = null): void
     {
         $definitions = $this->getPermissionDefinitions();
 
-        $this->syncPermissionsForPanel('store', $definitions['store'] ?? []);
-        $this->ensureSuperAdminRole('store');
+        $this->syncPermissionsForPanel('store', $definitions['store'] ?? [], $connection);
+        $this->ensureSuperAdminRole('store', $connection);
     }
 
-    public function assignStoreSuperAdmin(User $user, Store $store): void
+    public function assignStoreSuperAdmin(User $user, Store $store, ?string $connection = null): void
     {
-        $storeSuperAdminRole = Role::query()
+        $roleQuery = $connection ? Role::on($connection) : Role::query();
+
+        $storeSuperAdminRole = $roleQuery
             ->where('name', 'Super Admin')
             ->where('panel', 'store')
             ->whereNull('store_id')
@@ -33,7 +35,7 @@ class CoreAccessBootstrapService
             return;
         }
 
-        if (Schema::hasTable('store_user') && ! DB::table('store_user')
+        if (Schema::connection($connection)->hasTable('store_user') && ! DB::connection($connection)->table('store_user')
             ->where('store_id', $store->id)
             ->where('user_id', $user->id)
             ->exists()) {
@@ -42,31 +44,31 @@ class CoreAccessBootstrapService
                 'user_id' => $user->id,
             ];
 
-            if (Schema::hasColumn('store_user', 'cash_in_hand')) {
+            if (Schema::connection($connection)->hasColumn('store_user', 'cash_in_hand')) {
                 $storeUserData['cash_in_hand'] = 0;
             }
 
-            if (Schema::hasColumn('store_user', 'role_id')) {
+            if (Schema::connection($connection)->hasColumn('store_user', 'role_id')) {
                 $storeUserData['role_id'] = $storeSuperAdminRole->id;
             }
 
-            if (Schema::hasColumn('store_user', 'created_at')) {
+            if (Schema::connection($connection)->hasColumn('store_user', 'created_at')) {
                 $storeUserData['created_at'] = now();
             }
 
-            if (Schema::hasColumn('store_user', 'updated_at')) {
+            if (Schema::connection($connection)->hasColumn('store_user', 'updated_at')) {
                 $storeUserData['updated_at'] = now();
             }
 
-            DB::table('store_user')->insert($storeUserData);
+            DB::connection($connection)->table('store_user')->insert($storeUserData);
         }
 
-        if (! DB::table('user_role')
+        if (! DB::connection($connection)->table('user_role')
             ->where('user_id', $user->id)
             ->where('role_id', $storeSuperAdminRole->id)
             ->where('store_id', $store->id)
             ->exists()) {
-            DB::table('user_role')->insert([
+            DB::connection($connection)->table('user_role')->insert([
                 'user_id' => $user->id,
                 'role_id' => $storeSuperAdminRole->id,
                 'store_id' => $store->id,
@@ -76,7 +78,7 @@ class CoreAccessBootstrapService
         }
     }
 
-    private function syncPermissionsForPanel(string $panel, array $groups): void
+    private function syncPermissionsForPanel(string $panel, array $groups, ?string $connection): void
     {
         foreach ($groups as $group => $permissions) {
             foreach ($permissions as $permissionData) {
@@ -85,7 +87,9 @@ class CoreAccessBootstrapService
                     continue;
                 }
 
-                Permission::query()->updateOrCreate(
+                $permissionQuery = $connection ? Permission::on($connection) : Permission::query();
+
+                $permissionQuery->updateOrCreate(
                     ['name' => $name],
                     [
                         'name' => $name,
@@ -98,9 +102,11 @@ class CoreAccessBootstrapService
         }
     }
 
-    private function ensureSuperAdminRole(string $panel): void
+    private function ensureSuperAdminRole(string $panel, ?string $connection): void
     {
-        $role = Role::query()->firstOrCreate(
+        $roleQuery = $connection ? Role::on($connection) : Role::query();
+
+        $role = $roleQuery->firstOrCreate(
             [
                 'name' => 'Super Admin',
                 'panel' => $panel,
@@ -112,11 +118,28 @@ class CoreAccessBootstrapService
             ]
         );
 
-        $permissionIds = Permission::query()
+        $permissionQuery = $connection ? Permission::on($connection) : Permission::query();
+
+        $permissionIds = $permissionQuery
             ->where('panel', $panel)
             ->pluck('id');
 
-        $role->permissions()->sync($permissionIds);
+        DB::connection($connection)->table('role_has_permissions')
+            ->where('role_id', $role->id)
+            ->delete();
+
+        if ($permissionIds->isNotEmpty()) {
+            $rows = $permissionIds
+                ->map(fn ($permissionId) => [
+                    'role_id' => $role->id,
+                    'permission_id' => $permissionId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ])
+                ->all();
+
+            DB::connection($connection)->table('role_has_permissions')->insert($rows);
+        }
     }
 
     private function getPermissionDefinitions(): array
