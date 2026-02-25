@@ -36,8 +36,7 @@ class ProductStats extends StatsOverviewWidget
         // Low Stock Variations (stock <= 10)
         $lowStockVariations = Variation::query()
             ->where('store_id', $store->id)
-            ->withBarcodeStock()
-            ->having('stock', '<=', 10)
+            ->whereRaw('(SELECT SUM(stocks.stock) FROM stocks WHERE stocks.variation_id = variations.id) <= ?', [10])
             ->count();
 
         // Products chart (last 7 days - cumulative count optimized with single query)
