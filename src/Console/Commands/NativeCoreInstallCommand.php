@@ -7,6 +7,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 use SmartTill\Core\Services\CoreAccessBootstrapService;
+use SmartTill\Core\Services\CoreGeoBootstrapService;
 
 class NativeCoreInstallCommand extends Command
 {
@@ -48,6 +49,9 @@ class NativeCoreInstallCommand extends Command
 
             return self::FAILURE;
         }
+
+        $this->info('Bootstrapping countries, currencies, and timezones on nativephp...');
+        app(CoreGeoBootstrapService::class)->ensureGeoData('nativephp');
 
         $this->info('Bootstrapping permissions and Super Admin roles on nativephp...');
         app(CoreAccessBootstrapService::class)->ensureCoreAccess('nativephp');

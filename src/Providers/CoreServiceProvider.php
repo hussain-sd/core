@@ -23,12 +23,14 @@ use SmartTill\Core\Observers\TransactionObserver;
 use SmartTill\Core\Observers\UnitObserver;
 use SmartTill\Core\Observers\VariationObserver;
 use SmartTill\Core\Services\CoreAccessBootstrapService;
+use SmartTill\Core\Services\CoreGeoBootstrapService;
 
 class CoreServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->app->singleton(CoreAccessBootstrapService::class, CoreAccessBootstrapService::class);
+        $this->app->singleton(CoreGeoBootstrapService::class, CoreGeoBootstrapService::class);
 
         $this->commands([
             CoreInstallCommand::class,

@@ -8,6 +8,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        $this->createCountriesTable();
+        $this->createCurrenciesTable();
+        $this->createTimezonesTable();
+        $this->createCountryCurrencyTable();
+        $this->createCountryTimezoneTable();
         $this->createUnitDimensionsTable();
         $this->createUnitsTable();
         $this->createStoreSettingsTable();
@@ -39,6 +44,7 @@ return new class extends Migration
 
     public function down(): void
     {
+        Schema::disableForeignKeyConstraints();
         Schema::dropIfExists('model_activities');
         Schema::dropIfExists('invitations');
         Schema::dropIfExists('user_role');
@@ -66,6 +72,96 @@ return new class extends Migration
         Schema::dropIfExists('store_settings');
         Schema::dropIfExists('units');
         Schema::dropIfExists('unit_dimensions');
+        Schema::dropIfExists('country_timezone');
+        Schema::dropIfExists('country_currency');
+        Schema::dropIfExists('timezones');
+        Schema::dropIfExists('currencies');
+        Schema::dropIfExists('countries');
+        Schema::enableForeignKeyConstraints();
+    }
+
+    private function createCountriesTable(): void
+    {
+        if (Schema::hasTable('countries')) {
+            return;
+        }
+
+        Schema::create('countries', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('code', 2)->unique();
+            $table->string('code3', 3)->nullable();
+            $table->string('numeric_code', 3)->nullable();
+            $table->timestamp('synced_at')->nullable();
+            $table->timestamps();
+
+            $table->index('code');
+        });
+    }
+
+    private function createCurrenciesTable(): void
+    {
+        if (Schema::hasTable('currencies')) {
+            return;
+        }
+
+        Schema::create('currencies', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('code', 3)->unique();
+            $table->unsignedTinyInteger('decimal_places')->default(2);
+            $table->timestamps();
+
+            $table->index('code');
+        });
+    }
+
+    private function createTimezonesTable(): void
+    {
+        if (Schema::hasTable('timezones')) {
+            return;
+        }
+
+        Schema::create('timezones', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name')->unique();
+            $table->string('offset')->nullable();
+            $table->timestamps();
+
+            $table->index('name');
+        });
+    }
+
+    private function createCountryCurrencyTable(): void
+    {
+        if (Schema::hasTable('country_currency')) {
+            return;
+        }
+
+        Schema::create('country_currency', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('country_id')->constrained('countries')->cascadeOnDelete();
+            $table->foreignId('currency_id')->constrained('currencies')->cascadeOnDelete();
+            $table->timestamps();
+
+            $table->unique(['country_id', 'currency_id']);
+        });
+    }
+
+    private function createCountryTimezoneTable(): void
+    {
+        if (Schema::hasTable('country_timezone')) {
+            return;
+        }
+
+        Schema::create('country_timezone', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('country_id')->constrained('countries')->cascadeOnDelete();
+            $table->foreignId('timezone_id')->constrained('timezones')->cascadeOnDelete();
+            $table->timestamps();
+
+            $table->unique(['country_id', 'timezone_id']);
+        });
     }
 
     private function createUnitDimensionsTable(): void

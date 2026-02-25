@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 use SmartTill\Core\Services\CoreAccessBootstrapService;
+use SmartTill\Core\Services\CoreGeoBootstrapService;
 
 class CoreInstallCommand extends Command
 {
@@ -41,6 +42,9 @@ class CoreInstallCommand extends Command
 
             return self::FAILURE;
         }
+
+        $this->info('Bootstrapping countries, currencies, and timezones...');
+        app(CoreGeoBootstrapService::class)->ensureGeoData();
 
         $this->info('Bootstrapping permissions and Super Admin roles...');
         app(CoreAccessBootstrapService::class)->ensureCoreAccess();
