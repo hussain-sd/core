@@ -14,6 +14,10 @@ class ResourceCanAccessHelper
             return false;
         }
 
+        if (method_exists($user, 'shouldBypassCorePermissions') && $user->shouldBypassCorePermissions()) {
+            return true;
+        }
+
         $store = Filament::getTenant();
 
         if (! $store) {
