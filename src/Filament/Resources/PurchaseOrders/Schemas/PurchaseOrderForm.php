@@ -358,7 +358,11 @@ class PurchaseOrderForm
                                         ->rule(function () {
                                             $store = Filament::getTenant();
                                             $currency = $store?->currency;
-                                            $decimalPlaces = $currency->decimal_places ?? 2;
+                                            $decimalPlaces = max(0, (int) ($currency->decimal_places ?? 2));
+
+                                            if ($decimalPlaces === 0) {
+                                                return 'regex:/^\\d+$/';
+                                            }
 
                                             return 'regex:/^\\d+(\\.\\d{1,'.$decimalPlaces.'})?$/';
                                         })

@@ -173,7 +173,7 @@ class StocksRelationManager extends RelationManager
                 ->numeric()
                 ->inputMode('decimal')
                 ->step(fn () => $this->getCurrencyStep())
-                ->rule(fn () => 'regex:/^\\d+(\\.\\d{1,'.$this->getCurrencyDecimalPlaces().'})?$/')
+                ->rule(fn () => $this->getCurrencyAmountRegexRule())
                 ->prefix(fn () => Filament::getTenant()?->currency->code ?? 'PKR')
                 ->default(fn () => $this->getVariationBasePrice())
                 ->live(onBlur: true)
@@ -287,7 +287,7 @@ class StocksRelationManager extends RelationManager
                         ->numeric()
                         ->inputMode('decimal')
                         ->step(fn () => $this->getCurrencyStep())
-                        ->rule(fn () => 'regex:/^\\d+(\\.\\d{1,'.$this->getCurrencyDecimalPlaces().'})?$/')
+                        ->rule(fn () => $this->getCurrencyAmountRegexRule())
                         ->prefix(fn () => Filament::getTenant()?->currency->code ?? 'PKR')
                         ->live(onBlur: true)
                         ->afterStateUpdated(function (mixed $state, $set, $get): void {
@@ -370,7 +370,7 @@ class StocksRelationManager extends RelationManager
                         ->numeric()
                         ->inputMode('decimal')
                         ->step(fn () => $this->getCurrencyStep())
-                        ->rule(fn () => 'regex:/^\\d+(\\.\\d{1,'.$this->getCurrencyDecimalPlaces().'})?$/')
+                        ->rule(fn () => $this->getCurrencyAmountRegexRule())
                         ->prefix(fn () => Filament::getTenant()?->currency->code ?? 'PKR')
                         ->live(onBlur: true)
                         ->afterStateUpdated(function (mixed $state, $set, $get): void {
@@ -601,7 +601,17 @@ class StocksRelationManager extends RelationManager
     {
         $currency = Filament::getTenant()?->currency;
 
-        return $currency?->decimal_places ?? 2;
+        return max(0, (int) ($currency?->decimal_places ?? 2));
+    }
+
+    private function getCurrencyAmountRegexRule(): string
+    {
+        $decimalPlaces = $this->getCurrencyDecimalPlaces();
+        if ($decimalPlaces === 0) {
+            return 'regex:/^\\d+$/';
+        }
+
+        return 'regex:/^\\d+(\\.\\d{1,'.$decimalPlaces.'})?$/';
     }
 
     private function getCurrencyStep(): string
