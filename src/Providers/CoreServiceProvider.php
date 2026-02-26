@@ -4,6 +4,8 @@ namespace SmartTill\Core\Providers;
 
 use App\Models\Store as AppStore;
 use App\Models\User as AppUser;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
 use SmartTill\Core\Console\Commands\CoreInstallCommand;
@@ -54,6 +56,7 @@ class CoreServiceProvider extends ServiceProvider
         $this->registerHostModelFallbackRelations();
 
         $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
+        $this->registerPackageRoutes();
         $this->loadViewsFrom(__DIR__.'/../../resources/views', 'smart-core');
         Livewire::component('product-search', \SmartTill\Core\Livewire\ProductSearch::class);
 
@@ -73,6 +76,8 @@ class CoreServiceProvider extends ServiceProvider
 
     private function registerHostModelFallbackRelations(): void
     {
+        $pivotColumns = $this->getStoreUserPivotColumns();
+
         if (class_exists(AppStore::class)) {
             if (! method_exists(AppStore::class, 'currency')) {
                 AppStore::resolveRelationUsing('currency', fn (AppStore $store) => $store->belongsTo(Currency::class, 'currency_id'));
@@ -93,7 +98,7 @@ class CoreServiceProvider extends ServiceProvider
             if (! method_exists(AppStore::class, 'users')) {
                 AppStore::resolveRelationUsing(
                     'users',
-                    fn (AppStore $store) => $store->belongsToMany(AppUser::class, 'store_user')->withPivot('cash_in_hand', 'role_id')
+                    fn (AppStore $store) => $store->belongsToMany(AppUser::class, 'store_user')->withPivot($pivotColumns)
                 );
             }
         }
@@ -102,7 +107,7 @@ class CoreServiceProvider extends ServiceProvider
             if (! method_exists(AppUser::class, 'stores')) {
                 AppUser::resolveRelationUsing(
                     'stores',
-                    fn (AppUser $user) => $user->belongsToMany(AppStore::class, 'store_user')->withPivot('cash_in_hand', 'role_id')
+                    fn (AppUser $user) => $user->belongsToMany(AppStore::class, 'store_user')->withPivot($pivotColumns)
                 );
             }
 
@@ -113,5 +118,32 @@ class CoreServiceProvider extends ServiceProvider
                 );
             }
         }
+    }
+
+    private function registerPackageRoutes(): void
+    {
+        if (! Route::has('public.receipt')) {
+            $this->loadRoutesFrom(__DIR__.'/../../routes/web.php');
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function getStoreUserPivotColumns(): array
+    {
+        $pivotColumns = [];
+
+        if (Schema::hasTable('store_user')) {
+            if (Schema::hasColumn('store_user', 'cash_in_hand')) {
+                $pivotColumns[] = 'cash_in_hand';
+            }
+
+            if (Schema::hasColumn('store_user', 'role_id')) {
+                $pivotColumns[] = 'role_id';
+            }
+        }
+
+        return $pivotColumns;
     }
 }

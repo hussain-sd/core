@@ -9,6 +9,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\SalePaymentStatus;
 use SmartTill\Core\Enums\SaleStatus;
 use SmartTill\Core\Filament\Resources\Sales\SaleResource;
@@ -36,6 +37,10 @@ class ViewSale extends ViewRecord
                 ->visible(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Sales'))
                 ->authorize(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Sales'))
                 ->action(function ($record) {
+                    if (! Route::has('public.receipt')) {
+                        return redirect()->to(SaleResource::getUrl('view', ['record' => $record->id]));
+                    }
+
                     return redirect()->route('public.receipt', [
                         'store' => $record->store?->slug,
                         'reference' => $record->reference,

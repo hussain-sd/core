@@ -18,6 +18,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\SalePaymentStatus;
 use SmartTill\Core\Enums\SaleStatus;
 use SmartTill\Core\Filament\Exports\SaleExporter;
@@ -104,6 +105,10 @@ class SalesTable
                         ->visible(fn () => ResourceCanAccessHelper::check('Print Sales'))
                         ->authorize(fn () => ResourceCanAccessHelper::check('Print Sales'))
                         ->action(function ($record) {
+                            if (! Route::has('public.receipt')) {
+                                return redirect()->to(SaleResource::getUrl());
+                            }
+
                             return redirect()->route('public.receipt', [
                                 'store' => $record->store?->slug,
                                 'reference' => $record->reference,

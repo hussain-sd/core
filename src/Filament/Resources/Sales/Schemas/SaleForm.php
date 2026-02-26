@@ -17,6 +17,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\SalePaymentMethod;
 use SmartTill\Core\Enums\SalePaymentStatus;
 use SmartTill\Core\Enums\SaleStatus;
@@ -4011,29 +4012,37 @@ class SaleForm
 
             $sale->loadMissing('store');
 
-            return redirect()->route('public.receipt', [
-                'store' => $sale->store->slug,
-                'reference' => $sale->reference,
-                'print' => 1,
-                'next' => SaleResource::getUrl('create'),
-            ])->with([
-                'print.next' => SaleResource::getUrl('create'),
-                'print.mode' => true,
-            ]);
+            if (Route::has('public.receipt')) {
+                return redirect()->route('public.receipt', [
+                    'store' => $sale->store->slug,
+                    'reference' => $sale->reference,
+                    'print' => 1,
+                    'next' => SaleResource::getUrl('create'),
+                ])->with([
+                    'print.next' => SaleResource::getUrl('create'),
+                    'print.mode' => true,
+                ]);
+            }
+
+            return redirect()->to(SaleResource::getUrl('create'));
         }
 
         if ($status === SaleStatus::Completed && ! empty($state['sale_id'])) {
             $sale->loadMissing('store');
 
-            return redirect()->route('public.receipt', [
-                'store' => $sale->store->slug,
-                'reference' => $sale->reference,
-                'print' => 1,
-                'next' => SaleResource::getUrl('edit', ['record' => $sale->id]),
-            ])->with([
-                'print.next' => SaleResource::getUrl('edit', ['record' => $sale->id]),
-                'print.mode' => true,
-            ]);
+            if (Route::has('public.receipt')) {
+                return redirect()->route('public.receipt', [
+                    'store' => $sale->store->slug,
+                    'reference' => $sale->reference,
+                    'print' => 1,
+                    'next' => SaleResource::getUrl('edit', ['record' => $sale->id]),
+                ])->with([
+                    'print.next' => SaleResource::getUrl('edit', ['record' => $sale->id]),
+                    'print.mode' => true,
+                ]);
+            }
+
+            return redirect()->to(SaleResource::getUrl('edit', ['record' => $sale->id]));
         }
 
         // Otherwise, just go to create page

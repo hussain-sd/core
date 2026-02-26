@@ -5,13 +5,14 @@ namespace SmartTill\Core\Services;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class UserStoreCashService
 {
     public function getCashInHandForStore(User $user, Store|int $store): float
     {
         $storeInstance = $this->resolveStore($store);
-        if (! $storeInstance) {
+        if (! $storeInstance || ! $this->hasCashInHandColumn()) {
             return 0.0;
         }
 
@@ -30,7 +31,7 @@ class UserStoreCashService
     public function updateCashInHandForStore(User $user, Store|int $store, float $amount): void
     {
         $storeInstance = $this->resolveStore($store);
-        if (! $storeInstance) {
+        if (! $storeInstance || ! $this->hasCashInHandColumn()) {
             return;
         }
 
@@ -45,7 +46,7 @@ class UserStoreCashService
     public function incrementCashInHandForStore(User $user, Store|int $store, float $amount): void
     {
         $storeInstance = $this->resolveStore($store);
-        if (! $storeInstance) {
+        if (! $storeInstance || ! $this->hasCashInHandColumn()) {
             return;
         }
 
@@ -58,7 +59,7 @@ class UserStoreCashService
     public function decrementCashInHandForStore(User $user, Store|int $store, float $amount): void
     {
         $storeInstance = $this->resolveStore($store);
-        if (! $storeInstance) {
+        if (! $storeInstance || ! $this->hasCashInHandColumn()) {
             return;
         }
 
@@ -83,5 +84,9 @@ class UserStoreCashService
 
         return (int) pow(10, $decimalPlaces);
     }
-}
 
+    private function hasCashInHandColumn(): bool
+    {
+        return Schema::hasTable('store_user') && Schema::hasColumn('store_user', 'cash_in_hand');
+    }
+}
