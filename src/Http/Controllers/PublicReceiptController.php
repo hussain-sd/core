@@ -29,12 +29,16 @@ class PublicReceiptController
 
         $autoPrint = filter_var($request->query('print'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         if ($autoPrint === null) {
-            $autoPrint = (bool) $request->session()->pull('print.mode', false);
+            $autoPrint = $request->hasSession()
+                ? (bool) $request->session()->pull('print.mode', false)
+                : false;
         }
 
         $next = $request->query('next');
         if (! $next) {
-            $next = $request->session()->pull('print.next', '/');
+            $next = $request->hasSession()
+                ? $request->session()->pull('print.next', '/')
+                : '/';
         }
 
         $viewName = view()->exists('print.sale')
@@ -53,9 +57,10 @@ class PublicReceiptController
     {
         $table = (new Store())->getTable();
         $query = Store::query();
+        $primaryKey = (new Store())->getKeyName();
 
         if (Schema::hasColumn($table, 'slug')) {
-            $query->where('slug', $store)->orWhereKey($store);
+            $query->where('slug', $store)->orWhere($primaryKey, $store);
         } else {
             $query->whereKey($store);
         }
