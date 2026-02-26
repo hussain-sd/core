@@ -6,15 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
     @php
+        $settingsService = app(\SmartTill\Core\Services\CoreStoreSettingsService::class);
+
         // Paper size configuration
-        $defaultPrintOption = $sale->store?->default_print_option;
-        if ($defaultPrintOption instanceof \SmartTill\Core\Enums\PrintOption) {
-            $defaultPaper = $defaultPrintOption->getWidth();
-        } elseif (is_string($defaultPrintOption)) {
-            $defaultPaper = \SmartTill\Core\Enums\PrintOption::tryFrom($defaultPrintOption)?->getWidth() ?? '210';
-        } else {
-            $defaultPaper = \SmartTill\Core\Enums\PrintOption::default()->getWidth();
-        }
+        $receiptFormat = $sale->store
+            ? $settingsService->getReceiptFormat($sale->store)
+            : \SmartTill\Core\Enums\PrintOption::default()->value;
+        $defaultPaper = \SmartTill\Core\Enums\PrintOption::tryFrom($receiptFormat)?->getWidth()
+            ?? \SmartTill\Core\Enums\PrintOption::default()->getWidth();
         $paper = $paper ?? request('paper') ?? $defaultPaper;
         $allowed = ['210','148','80','58'];
         $paper = in_array($paper, $allowed) ? $paper : $defaultPaper;
@@ -71,8 +70,12 @@
         };
 
         // Receipt settings from store
-        $showDecimals = $sale->store?->show_decimals_in_receipt_total ?? true;
-        $showDifferences = $sale->store?->show_differences_in_receipt ?? false;
+        $showDecimals = $sale->store
+            ? $settingsService->getShowDecimalsInReceiptTotal($sale->store)
+            : true;
+        $showDifferences = $sale->store
+            ? $settingsService->getShowDifferencesInReceipt($sale->store)
+            : false;
 
 
         // Get currency code from store
@@ -100,7 +103,7 @@
         ];
         $paperClass = $paperClasses[$paper] ?? $paperClasses['210'];
         $isThermal = in_array($paper, ['80', '58'], true);
-        $isTaxEnabled = app(\SmartTill\Core\Services\CoreStoreSettingsService::class)->isTaxEnabled($sale->store);
+        $isTaxEnabled = $settingsService->isTaxEnabled($sale->store);
         $lineItemColumnCount = $isThermal ? 1 : ($isTaxEnabled ? 6 : 5);
         $metaGridClass = $isTaxEnabled
             ? 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]'
