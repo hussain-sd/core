@@ -296,7 +296,6 @@ class PurchaseOrderForm
                                         ->extraInputAttributes([
                                             'class' => 'text-xs py-0.5 px-1.5 h-7',
                                             'data-sale-item-input' => 'true',
-                                            'x-on:focus' => '$event.target.select()',
                                         ])
                                         ->afterStateUpdated(function ($state, $set, $get): void {
                                             $variationId = $get('variation_id');
