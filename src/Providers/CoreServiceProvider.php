@@ -4,6 +4,7 @@ namespace SmartTill\Core\Providers;
 
 use App\Models\Store as AppStore;
 use App\Models\User as AppUser;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -13,11 +14,14 @@ use SmartTill\Core\Console\Commands\NativeCoreInstallCommand;
 use SmartTill\Core\Models\Attribute;
 use SmartTill\Core\Models\Country;
 use SmartTill\Core\Models\Currency;
+use SmartTill\Core\Models\Customer;
 use SmartTill\Core\Models\Payment;
 use SmartTill\Core\Models\Product;
+use SmartTill\Core\Models\PurchaseOrder;
 use SmartTill\Core\Models\Sale;
 use SmartTill\Core\Models\Stock;
 use SmartTill\Core\Models\StoreSetting;
+use SmartTill\Core\Models\Supplier;
 use SmartTill\Core\Models\Timezone;
 use SmartTill\Core\Models\Transaction;
 use SmartTill\Core\Models\Unit;
@@ -53,6 +57,7 @@ class CoreServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->registerMorphMapCompatibility();
         $this->registerHostModelFallbackRelations();
 
         $this->loadMigrationsFrom(__DIR__.'/../../database/migrations');
@@ -72,6 +77,24 @@ class CoreServiceProvider extends ServiceProvider
         if (class_exists(\App\Models\Store::class) && ! class_exists(\App\Observers\StoreObserver::class)) {
             \App\Models\Store::observe(\SmartTill\Core\Observers\StoreObserver::class);
         }
+    }
+
+    private function registerMorphMapCompatibility(): void
+    {
+        Relation::morphMap([
+            'App\Models\Customer' => Customer::class,
+            'App\Models\Supplier' => Supplier::class,
+            'App\Models\Sale' => Sale::class,
+            'App\Models\PurchaseOrder' => PurchaseOrder::class,
+            'App\Models\Payment' => Payment::class,
+            'App\Models\Transaction' => Transaction::class,
+            Customer::class => Customer::class,
+            Supplier::class => Supplier::class,
+            Sale::class => Sale::class,
+            PurchaseOrder::class => PurchaseOrder::class,
+            Payment::class => Payment::class,
+            Transaction::class => Transaction::class,
+        ]);
     }
 
     private function registerHostModelFallbackRelations(): void
