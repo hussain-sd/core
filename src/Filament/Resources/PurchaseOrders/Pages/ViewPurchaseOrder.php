@@ -10,6 +10,7 @@ use Filament\Actions\RestoreAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\PurchaseOrderStatus;
 use SmartTill\Core\Filament\Resources\PurchaseOrders\PurchaseOrderResource;
 use SmartTill\Core\Services\PurchaseOrderTransactionService;
@@ -39,11 +40,11 @@ class ViewPurchaseOrder extends ViewRecord
                 ->label('Print')
                 ->icon(Heroicon::OutlinedPrinter)
                 ->color('gray')
-                ->visible(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
-                ->authorize(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
-                ->url(fn () => route('print.purchase-order', [
+                ->visible(fn () => Route::has('print.purchase-order') && \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
+                ->authorize(fn () => Route::has('print.purchase-order') && \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
+                ->url(fn () => Route::has('print.purchase-order') ? route('print.purchase-order', [
                     'purchaseOrder' => $this->record->id,
-                ]))
+                ]) : null)
                 ->openUrlInNewTab(),
             Action::make('receive')
                 ->label('Mark as Closed')

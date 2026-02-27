@@ -18,6 +18,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\PurchaseOrderStatus;
 use SmartTill\Core\Filament\Resources\Suppliers\RelationManagers\PurchaseOrdersRelationManager;
 
@@ -90,11 +91,11 @@ class PurchaseOrdersTable
                         ->label('Print')
                         ->icon(Heroicon::OutlinedPrinter)
                         ->color('gray')
-                        ->visible(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
-                        ->authorize(fn () => \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
-                        ->url(fn ($record) => route('print.purchase-order', [
+                        ->visible(fn () => Route::has('print.purchase-order') && \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
+                        ->authorize(fn () => Route::has('print.purchase-order') && \SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper::check('Print Purchase Orders'))
+                        ->url(fn ($record) => Route::has('print.purchase-order') ? route('print.purchase-order', [
                             'purchaseOrder' => $record->id,
-                        ]))
+                        ]) : null)
                         ->openUrlInNewTab(),
                     Action::make('close')
                         ->label('Mark as Closed')
