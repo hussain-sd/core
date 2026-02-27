@@ -640,7 +640,9 @@
     const nextUrl = @json($next ?? '/');
     const autoPrint = @json($autoPrint);
     let printInitiated = false;
+    let printDialogRequested = false;
     let redirected = false;
+    let redirectTimer = null;
 
     if (autoPrint && window.location.search) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
@@ -650,6 +652,15 @@
         if (redirected) return;
         redirected = true;
         location.replace(nextUrl);
+    }
+
+    function scheduleReturn(delay = 250) {
+        if (redirected) return;
+        if (redirectTimer) {
+            clearTimeout(redirectTimer);
+        }
+
+        redirectTimer = setTimeout(goNext, delay);
     }
 
         function hideNotesIfMultiPage() {
@@ -685,14 +696,17 @@
             }, 100);
 
         setTimeout(() => {
+            printDialogRequested = true;
+
             try {
                 window.print();
             } catch (e) {
                     console.error('Print error:', e);
+                    scheduleReturn(0);
             }
             }, 150);
 
-        setTimeout(goNext, 5000);
+        setTimeout(() => scheduleReturn(0), 8000);
     }
 
     function prepareAndPrint() {
@@ -709,7 +723,19 @@
 
     window.addEventListener('afterprint', () => {
         document.documentElement.classList.remove('printing');
-        goNext();
+        scheduleReturn(150);
+    });
+
+    window.addEventListener('focus', () => {
+        if (printDialogRequested) {
+            scheduleReturn(250);
+        }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (printDialogRequested && document.visibilityState === 'visible') {
+            scheduleReturn(250);
+        }
     });
 
         if (autoPrint) {
