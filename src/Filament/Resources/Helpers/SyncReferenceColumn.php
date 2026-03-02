@@ -8,12 +8,18 @@ class SyncReferenceColumn
 {
     public static function make(): TextColumn
     {
-        return TextColumn::make('server_id')
+        return TextColumn::make('reference')
             ->label('Reference')
+            ->state(fn ($record): ?string => filled($record->reference ?? null)
+                ? (string) $record->reference
+                : (filled($record->server_id ?? null)
+                    ? (string) $record->server_id
+                    : (filled($record->local_id ?? null) ? (string) $record->local_id : null)))
             ->formatStateUsing(fn ($state): string => filled($state) ? (string) $state : '—')
-            ->description(fn ($record): ?string => filled($record->local_id ?? null) ? (string) $record->local_id : null)
-            ->searchable(['server_id', 'local_id'])
+            ->description(fn ($record): ?string => filled($record->server_id ?? null) && filled($record->local_id ?? null)
+                ? (string) $record->local_id
+                : null)
+            ->searchable(['reference', 'server_id', 'local_id'])
             ->sortable();
     }
 }
-
