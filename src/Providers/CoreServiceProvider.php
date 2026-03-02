@@ -12,6 +12,8 @@ use Livewire\Livewire;
 use SmartTill\Core\Console\Commands\CoreInstallCommand;
 use SmartTill\Core\Console\Commands\NativeCoreInstallCommand;
 use SmartTill\Core\Models\Attribute;
+use SmartTill\Core\Models\Brand;
+use SmartTill\Core\Models\Category;
 use SmartTill\Core\Models\Country;
 use SmartTill\Core\Models\Currency;
 use SmartTill\Core\Models\Customer;
@@ -31,6 +33,7 @@ use SmartTill\Core\Observers\PaymentObserver;
 use SmartTill\Core\Observers\ProductObserver;
 use SmartTill\Core\Observers\SaleObserver;
 use SmartTill\Core\Observers\StockObserver;
+use SmartTill\Core\Observers\StoreScopedReferenceObserver;
 use SmartTill\Core\Observers\TransactionObserver;
 use SmartTill\Core\Observers\UnitObserver;
 use SmartTill\Core\Observers\VariationObserver;
@@ -73,6 +76,15 @@ class CoreServiceProvider extends ServiceProvider
         Sale::observe(SaleObserver::class);
         Payment::observe(PaymentObserver::class);
         Transaction::observe(TransactionObserver::class);
+        Attribute::observe(StoreScopedReferenceObserver::class);
+        Brand::observe(StoreScopedReferenceObserver::class);
+        Category::observe(StoreScopedReferenceObserver::class);
+        Customer::observe(StoreScopedReferenceObserver::class);
+        Product::observe(StoreScopedReferenceObserver::class);
+        PurchaseOrder::observe(StoreScopedReferenceObserver::class);
+        Supplier::observe(StoreScopedReferenceObserver::class);
+        Unit::observe(StoreScopedReferenceObserver::class);
+        Variation::observe(StoreScopedReferenceObserver::class);
 
         if (class_exists(\App\Models\Store::class) && ! class_exists(\App\Observers\StoreObserver::class)) {
             \App\Models\Store::observe(\SmartTill\Core\Observers\StoreObserver::class);
