@@ -10,24 +10,12 @@ class StoreScopedReferenceObserver
 {
     public function creating(Model $model): void
     {
-        $table = $model->getTable();
-        if (! Schema::hasColumn($table, 'reference')) {
-            return;
-        }
+        $this->assignStoreScopedReferenceIfMissing($model);
+    }
 
-        $storeId = $this->resolveStoreId($model);
-        $reference = trim((string) ($model->getAttribute('reference') ?? ''));
-
-        if ($storeId <= 0 || $reference !== '') {
-            return;
-        }
-
-        $nextReference = DB::table($table)
-            ->where('store_id', $storeId)
-            ->whereNotNull('reference')
-            ->count() + 1;
-
-        $model->setAttribute('reference', (string) $nextReference);
+    public function created(Model $model): void
+    {
+        $this->assignStoreScopedReferenceIfMissing($model, true);
     }
 
     private function resolveStoreId(Model $model): int
@@ -54,5 +42,45 @@ class StoreScopedReferenceObserver
             'unit_dimensions' => (int) ($model->getAttribute('store_id') ?? 0),
             default => 0,
         };
+    }
+
+    private function assignStoreScopedReferenceIfMissing(Model $model, bool $persisted = false): void
+    {
+        if (config('smart_till.reference_on_create', true) !== true) {
+            return;
+        }
+
+        $table = $model->getTable();
+        if (! Schema::hasColumn($table, 'reference')) {
+            return;
+        }
+
+        $storeId = $this->resolveStoreId($model);
+        $reference = trim((string) ($model->getAttribute('reference') ?? ''));
+
+        if ($storeId <= 0 || $reference !== '') {
+            return;
+        }
+
+        $nextReference = (int) DB::table($table)
+            ->where('store_id', $storeId)
+            ->whereNotNull('reference')
+            ->pluck('reference')
+            ->map(static fn ($value): int => (int) $value)
+            ->max() + 1;
+
+        if ($persisted) {
+            $keyName = $model->getKeyName();
+            $key = $model->getKey();
+
+            if ($key !== null) {
+                DB::table($table)
+                    ->where($keyName, $key)
+                    ->whereNull('reference')
+                    ->update(['reference' => (string) $nextReference]);
+            }
+        }
+
+        $model->setAttribute('reference', (string) $nextReference);
     }
 }
