@@ -78,6 +78,7 @@ class AttributesTable
                     ForceDeleteBulkAction::make()
                         ->visible(fn ($records) => $records->every(fn ($record) => $record->trashed())),
                 ]),
-            ]);
+            ])
+            ->defaultSort('id', 'desc');
     }
 }

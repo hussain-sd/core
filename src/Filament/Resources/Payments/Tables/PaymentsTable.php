@@ -11,6 +11,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\PaymentMethod;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Helpers\SyncReferenceColumn;
@@ -114,12 +115,12 @@ class PaymentsTable
                     ->label('Print')
                     ->icon(Heroicon::OutlinedPrinter)
                     ->color('gray')
-                    ->visible(fn () => ResourceCanAccessHelper::check('Print Payments'))
+                    ->visible(fn () => ResourceCanAccessHelper::check('Print Payments') && Route::has('print.payment'))
                     ->authorize(fn () => ResourceCanAccessHelper::check('Print Payments'))
-                    ->url(fn ($record) => route('print.payment', [
+                    ->url(fn ($record) => Route::has('print.payment') ? route('print.payment', [
                         'payment' => $record->id,
                         'next' => PaymentResource::getUrl(),
-                    ]))
+                    ]) : null)
                     ->openUrlInNewTab(),
             ])
             ->toolbarActions([]);

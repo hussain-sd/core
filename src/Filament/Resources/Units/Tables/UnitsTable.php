@@ -93,7 +93,6 @@ class UnitsTable
             ->groups([
                 'dimension.name',
             ])
-            ->defaultGroup('dimension.name')
             ->filters([
                 TrashedFilter::make(),
             ])
