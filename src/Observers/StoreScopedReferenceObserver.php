@@ -18,6 +18,11 @@ class StoreScopedReferenceObserver
         $this->assignStoreScopedReferenceIfMissing($model, true);
     }
 
+    public function saved(Model $model): void
+    {
+        $this->assignStoreScopedReferenceIfMissing($model, true);
+    }
+
     private function resolveStoreId(Model $model): int
     {
         $table = $model->getTable();
@@ -57,8 +62,11 @@ class StoreScopedReferenceObserver
 
         $storeId = $this->resolveStoreId($model);
         $reference = trim((string) ($model->getAttribute('reference') ?? ''));
+        if ($storeId <= 0) {
+            return;
+        }
 
-        if ($storeId <= 0 || $reference !== '') {
+        if ($persisted && $reference !== '') {
             return;
         }
 

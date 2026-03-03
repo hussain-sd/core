@@ -17,16 +17,15 @@ trait HasStoreScopedReference
         static::created(function (Model $model): void {
             self::assignStoreScopedReferenceIfMissing($model, true);
         });
+
+        static::saved(function (Model $model): void {
+            self::assignStoreScopedReferenceIfMissing($model, true);
+        });
     }
 
     private static function assignStoreScopedReferenceIfMissing(Model $model, bool $persisted = false): void
     {
         if (config('smart_till.reference_on_create', true) !== true) {
-            return;
-        }
-
-        $reference = trim((string) ($model->getAttribute('reference') ?? ''));
-        if ($reference !== '') {
             return;
         }
 
@@ -37,6 +36,11 @@ trait HasStoreScopedReference
 
         $storeId = (int) ($model->getAttribute('store_id') ?? 0);
         if ($storeId <= 0) {
+            return;
+        }
+
+        $reference = trim((string) ($model->getAttribute('reference') ?? ''));
+        if ($persisted && $reference !== '') {
             return;
         }
 

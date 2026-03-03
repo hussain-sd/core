@@ -6,7 +6,7 @@ it('guards store scoped observer by config and supports created fallback', funct
     expect($contents)
         ->toContain("config('smart_till.reference_on_create', true) !== true")
         ->toContain('public function created(Model $model): void')
+        ->toContain('public function saved(Model $model): void')
         ->toContain("->whereNull('reference')")
         ->toContain("->max() + 1");
 });
-
