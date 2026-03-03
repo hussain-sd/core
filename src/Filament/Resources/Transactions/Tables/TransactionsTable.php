@@ -21,7 +21,12 @@ class TransactionsTable
     {
         return $table
             ->columns([
-                SyncReferenceColumn::make(),
+                SyncReferenceColumn::make()
+                    ->hiddenOn([
+                        TransactionsRelationManager::class,
+                        CustomerTransactionsRelationManager::class,
+                        SupplierTransactionsRelationManager::class,
+                    ]),
                 TextColumn::make('referenceable')
                     ->label('Reference')
                     ->description(fn ($record) => class_basename($record->referenceable_type), 'above')

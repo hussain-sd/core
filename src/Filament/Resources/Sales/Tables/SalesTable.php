@@ -36,10 +36,6 @@ class SalesTable
         return $table
             ->columns([
                 SyncReferenceColumn::make(),
-                TextColumn::make('reference')
-                    ->label('Sale #')
-                    ->prefix('#')
-                    ->searchable(['reference', 'local_id']),
                 TextColumn::make('customer')
                     ->label('Customer')
                     ->getStateUsing(fn ($record) => $record->customer?->name ?? 'Guest')
