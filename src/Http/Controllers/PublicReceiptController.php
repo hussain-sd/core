@@ -17,7 +17,23 @@ class PublicReceiptController
         $sale = Sale::query()
             ->where('store_id', $storeModel->id)
             ->where('reference', $reference)
-            ->firstOrFail();
+            ->first();
+
+        if ($sale === null) {
+            $sale = Sale::query()
+                ->where('store_id', $storeModel->id)
+                ->where('local_id', $reference)
+                ->first();
+        }
+
+        if ($sale === null && ctype_digit($reference)) {
+            $sale = Sale::query()
+                ->where('store_id', $storeModel->id)
+                ->whereKey((int) $reference)
+                ->first();
+        }
+
+        abort_if($sale === null, 404);
 
         $sale->loadMissing([
             'customer',

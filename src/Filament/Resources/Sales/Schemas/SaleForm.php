@@ -4013,9 +4013,11 @@ class SaleForm
             $sale->loadMissing('store');
 
             if (Route::has('public.receipt')) {
+                $receiptReference = (string) ($sale->reference ?: ($sale->local_id ?: $sale->id));
+
                 return redirect()->route('public.receipt', [
                     'store' => $sale->store->slug,
-                    'reference' => $sale->reference,
+                    'reference' => $receiptReference,
                     'print' => 1,
                     'next' => SaleResource::getUrl('create'),
                 ])->with([
@@ -4031,9 +4033,11 @@ class SaleForm
             $sale->loadMissing('store');
 
             if (Route::has('public.receipt')) {
+                $receiptReference = (string) ($sale->reference ?: ($sale->local_id ?: $sale->id));
+
                 return redirect()->route('public.receipt', [
                     'store' => $sale->store->slug,
-                    'reference' => $sale->reference,
+                    'reference' => $receiptReference,
                     'print' => 1,
                     'next' => SaleResource::getUrl('edit', ['record' => $sale->id]),
                 ])->with([
