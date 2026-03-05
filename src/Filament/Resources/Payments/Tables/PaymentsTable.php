@@ -13,14 +13,26 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Route;
 use SmartTill\Core\Enums\PaymentMethod;
+use SmartTill\Core\Filament\Resources\Customers\CustomerResource;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Helpers\SyncReferenceColumn;
 use SmartTill\Core\Filament\Resources\Payments\PaymentResource;
+use SmartTill\Core\Filament\Resources\Suppliers\SupplierResource;
 use SmartTill\Core\Models\Customer;
 use SmartTill\Core\Models\Supplier;
 
 class PaymentsTable
 {
+    private const CUSTOMER_PAYABLE_TYPES = [
+        Customer::class,
+        'App\\Models\\Customer',
+    ];
+
+    private const SUPPLIER_PAYABLE_TYPES = [
+        Supplier::class,
+        'App\\Models\\Supplier',
+    ];
+
     public static function configure(Table $table): Table
     {
         return $table
@@ -31,6 +43,17 @@ class PaymentsTable
                     ->getStateUsing(fn ($record) => $record->payable?->name ?? '—')
                     ->description(fn ($record) => $record->payable_type ? class_basename($record->payable_type) : null, 'above')
                     ->color(fn ($record) => $record->payable ? 'primary' : null)
+                    ->url(function ($record) {
+                        if (in_array($record->payable_type, self::CUSTOMER_PAYABLE_TYPES, true) && $record->payable) {
+                            return CustomerResource::getUrl('view', ['record' => $record->payable]);
+                        }
+
+                        if (in_array($record->payable_type, self::SUPPLIER_PAYABLE_TYPES, true) && $record->payable) {
+                            return SupplierResource::getUrl('view', ['record' => $record->payable]);
+                        }
+
+                        return null;
+                    })
                     ->searchable(query: function (Builder $query, string $search) {
                         $query->whereHasMorph('payable', [Customer::class, Supplier::class], function (Builder $q) use ($search) {
                             $q->where('name', 'like', "%{$search}%")

@@ -24,3 +24,17 @@ it('ships payment print blade in core package', function (): void {
         ->toContain('prepareAndPrint')
         ->toContain('window.addEventListener(\'afterprint\'');
 });
+
+it('links payable column to customer and supplier views with alias compatibility', function (): void {
+    $tableContents = file_get_contents(__DIR__.'/../../src/Filament/Resources/Payments/Tables/PaymentsTable.php');
+
+    expect($tableContents)
+        ->toContain('CUSTOMER_PAYABLE_TYPES')
+        ->toContain('SUPPLIER_PAYABLE_TYPES')
+        ->toContain("'App\\\\Models\\\\Customer'")
+        ->toContain("'App\\\\Models\\\\Supplier'")
+        ->toContain("CustomerResource::getUrl('view'")
+        ->toContain("SupplierResource::getUrl('view'")
+        ->toContain('in_array($record->payable_type, self::CUSTOMER_PAYABLE_TYPES, true)')
+        ->toContain('in_array($record->payable_type, self::SUPPLIER_PAYABLE_TYPES, true)');
+});
