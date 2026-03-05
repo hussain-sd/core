@@ -16,6 +16,12 @@ class SupplierStatsOverview extends StatsOverviewWidget
 {
     use FormatsCurrency;
 
+    private const SUPPLIER_MORPH_TYPES = [
+        Supplier::class,
+        'App\\Models\\Supplier',
+        'supplier',
+    ];
+
     public ?Supplier $record = null;
 
     public static function canView(): bool
@@ -44,6 +50,7 @@ class SupplierStatsOverview extends StatsOverviewWidget
 
         // Pending Balance from latest transaction (negative means we owe the supplier)
         $latestTransaction = $this->record->transactions()
+            ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
             ->latest()
             ->first();
 

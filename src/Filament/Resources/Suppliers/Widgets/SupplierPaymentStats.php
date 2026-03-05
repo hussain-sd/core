@@ -16,6 +16,12 @@ class SupplierPaymentStats extends StatsOverviewWidget
 {
     use FormatsCurrency;
 
+    private const SUPPLIER_MORPH_TYPES = [
+        Supplier::class,
+        'App\\Models\\Supplier',
+        'supplier',
+    ];
+
     public static function canView(): bool
     {
         return ResourceCanAccessHelper::check('View Supplier Payment Stats Widget');
@@ -28,12 +34,12 @@ class SupplierPaymentStats extends StatsOverviewWidget
         // Get latest transactions for all suppliers in this store
         $latestTransactions = Transaction::query()
             ->where('store_id', $store->id)
-            ->where('transactionable_type', Supplier::class)
+            ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
             ->whereIn('id', function ($query) use ($store) {
                 $query->selectRaw('MAX(id)')
                     ->from('transactions')
                     ->where('store_id', $store->id)
-                    ->where('transactionable_type', Supplier::class)
+                    ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
                     ->groupBy('transactionable_id');
             })
             ->get();
@@ -62,7 +68,7 @@ class SupplierPaymentStats extends StatsOverviewWidget
         // Get daily pending amounts (optimized)
         $dailyPendingAmounts = DB::table('transactions')
             ->where('store_id', $store->id)
-            ->where('transactionable_type', Supplier::class)
+            ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
             ->where('amount_balance', '<', 0)
             ->whereDate('created_at', '>=', $start7)
             ->selectRaw('DATE(created_at) as date, ABS(SUM(amount_balance)) as total')
@@ -78,7 +84,7 @@ class SupplierPaymentStats extends StatsOverviewWidget
         // Get daily supplier counts (optimized)
         $dailySupplierCounts = DB::table('transactions')
             ->where('store_id', $store->id)
-            ->where('transactionable_type', Supplier::class)
+            ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
             ->where('amount_balance', '<', 0)
             ->whereDate('created_at', '>=', $start7)
             ->selectRaw('DATE(created_at) as date, COUNT(DISTINCT transactionable_id) as count')
@@ -110,13 +116,13 @@ class SupplierPaymentStats extends StatsOverviewWidget
 
         $latestTransactions = Transaction::query()
             ->where('store_id', $store->id)
-            ->where('transactionable_type', Supplier::class)
+            ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
             ->whereBetween('created_at', [$startDate->startOfDay(), $endDate->endOfDay()])
             ->whereIn('id', function ($query) use ($store, $startDate, $endDate) {
                 $query->selectRaw('MAX(id)')
                     ->from('transactions')
                     ->where('store_id', $store->id)
-                    ->where('transactionable_type', Supplier::class)
+                    ->whereIn('transactionable_type', self::SUPPLIER_MORPH_TYPES)
                     ->whereBetween('created_at', [$startDate->startOfDay(), $endDate->endOfDay()])
                     ->groupBy('transactionable_id');
             })
