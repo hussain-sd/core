@@ -11,10 +11,17 @@ use SmartTill\Core\Enums\SaleStatus;
 use SmartTill\Core\Filament\Concerns\FormatsCurrency;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Models\Customer;
+use SmartTill\Core\Models\Transaction;
 
 class CustomerStatsOverview extends StatsOverviewWidget
 {
     use FormatsCurrency;
+
+    private const CUSTOMER_MORPH_TYPES = [
+        Customer::class,
+        'App\\Models\\Customer',
+        'customer',
+    ];
 
     public ?Customer $record = null;
 
@@ -43,7 +50,10 @@ class CustomerStatsOverview extends StatsOverviewWidget
             ->count();
 
         // Pending Balance from latest transaction (only show positive balance - customer owes us)
-        $latestTransaction = $this->record->transactions()
+        $latestTransaction = Transaction::query()
+            ->where('store_id', $this->record->store_id)
+            ->where('transactionable_id', $this->record->id)
+            ->whereIn('transactionable_type', self::CUSTOMER_MORPH_TYPES)
             ->latest()
             ->first();
 
