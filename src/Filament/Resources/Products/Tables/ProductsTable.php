@@ -170,6 +170,12 @@ class ProductsTable
 
             ])
             ->filters([
+                SelectFilter::make('brand')
+                    ->relationship('brand', 'name')
+                    ->searchable()
+                    ->multiple()
+                    ->preload(),
+
                 SelectFilter::make('category')
                     ->relationship('category', 'name')
                     ->searchable()
