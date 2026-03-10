@@ -3,8 +3,6 @@
 namespace SmartTill\Core\Filament\Resources\Customers\RelationManagers;
 
 use Filament\Actions\Action;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\ExportBulkAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
@@ -19,11 +17,19 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Number;
+use Illuminate\Support\Str;
+use League\Csv\Bom;
+use League\Csv\Writer as CsvWriter;
+use OpenSpout\Common\Entity\Row;
+use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
+use SplTempFileObject;
 use SmartTill\Core\Enums\PaymentMethod;
-use SmartTill\Core\Filament\Exports\CustomerTransactionExporter;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Transactions\Tables\TransactionsTable;
+use SmartTill\Core\Models\Transaction;
 use SmartTill\Core\Services\PaymentService;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TransactionsRelationManager extends RelationManager
 {
@@ -127,15 +133,106 @@ class TransactionsRelationManager extends RelationManager
                         }
                     })
                     ->icon(Heroicon::OutlinedArrowDown),
-
+                Action::make('exportLedger')
+                    ->label('Export Ledger')
+                    ->icon(Heroicon::OutlinedArrowDownTray)
+                    ->color('gray')
+                    ->visible(fn () => ResourceCanAccessHelper::check('Export Sales'))
+                    ->authorize(fn () => ResourceCanAccessHelper::check('Export Sales'))
+                    ->schema([
+                        Select::make('format')
+                            ->label('Format')
+                            ->options([
+                                'xlsx' => 'Excel (.xlsx)',
+                                'csv' => 'CSV (.csv)',
+                            ])
+                            ->default('xlsx')
+                            ->required()
+                            ->native(false),
+                    ])
+                    ->action(fn (array $data, RelationManager $livewire) => $livewire->downloadLedgerReport($data['format'] ?? 'xlsx')),
             ])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    ExportBulkAction::make()
-                        ->exporter(CustomerTransactionExporter::class)
-                        ->visible(fn () => ResourceCanAccessHelper::check('Export Sales'))
-                        ->authorize(fn () => ResourceCanAccessHelper::check('Export Sales')),
-                ]),
+            ->toolbarActions([]);
+    }
+
+    public function downloadLedgerReport(string $format): StreamedResponse
+    {
+        $customer = $this->getOwnerRecord();
+        $store = Filament::getTenant();
+        $timezone = $store?->timezone?->name ?? config('app.timezone', 'UTC');
+        $decimalPlaces = $store?->currency?->decimal_places ?? 2;
+        $records = $this->getTableQueryForExport()
+            ->with(['referenceable', 'transactionable'])
+            ->get();
+
+        $metadataRows = [
+            ['Store Name', $store?->business_name ?: $store?->name ?: '—'],
+            ['Store Phone', $store?->phone ?: '—'],
+            ['Store Email', $store?->email ?: '—'],
+            ['Customer Name', $customer->name ?: '—'],
+            ['Customer Phone', $customer->phone ?: '—'],
+            ['Customer Email', $customer->email ?: '—'],
+            ['Generated At', now()->setTimezone($timezone)->format('M d, Y g:i A')],
+            [],
+        ];
+
+        $ledgerHeaderRow = ['Date', 'Reference', 'Note', 'Type', 'Amount', 'Balance'];
+
+        $ledgerRows = $records->map(function (Transaction $record) use ($timezone, $decimalPlaces): array {
+            $referenceValue = $record->referenceable?->reference
+                ?? $record->referenceable?->local_id
+                ?? $record->referenceable_id;
+            $referenceType = filled($record->referenceable_type)
+                ? class_basename($record->referenceable_type)
+                : 'Reference';
+
+            return [
+                $record->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
+                filled($referenceValue) ? "{$referenceType} #{$referenceValue}" : '—',
+                $record->note ?: '—',
+                Str::headline((string) $record->type),
+                Number::format((float) $record->amount, $decimalPlaces),
+                Number::format((float) $record->amount_balance, $decimalPlaces),
+            ];
+        })->all();
+
+        $fileBaseName = Str::slug(($store?->name ?: 'store').'-'.($customer->name ?: 'customer').'-ledger-'.now()->format('Y-m-d-His'));
+
+        if ($format === 'csv') {
+            return response()->streamDownload(function () use ($metadataRows, $ledgerHeaderRow, $ledgerRows): void {
+                $csv = CsvWriter::from(new SplTempFileObject);
+                $csv->setOutputBOM(Bom::Utf8);
+
+                foreach ($metadataRows as $row) {
+                    $csv->insertOne($row);
+                }
+
+                $csv->insertOne($ledgerHeaderRow);
+                $csv->insertAll($ledgerRows);
+
+                echo $csv->toString();
+            }, "{$fileBaseName}.csv", [
+                'Content-Type' => 'text/csv; charset=UTF-8',
             ]);
+        }
+
+        return response()->streamDownload(function () use ($fileBaseName, $metadataRows, $ledgerHeaderRow, $ledgerRows): void {
+            $writer = app(XlsxWriter::class);
+            $writer->openToBrowser("{$fileBaseName}.xlsx");
+
+            foreach ($metadataRows as $row) {
+                $writer->addRow(Row::fromValues($row));
+            }
+
+            $writer->addRow(Row::fromValues($ledgerHeaderRow));
+
+            foreach ($ledgerRows as $row) {
+                $writer->addRow(Row::fromValues($row));
+            }
+
+            $writer->close();
+        }, "{$fileBaseName}.xlsx", [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 }
