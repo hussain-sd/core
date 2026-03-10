@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
 use League\Csv\Bom;
+use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use SmartTill\Core\Enums\PaymentMethod;
@@ -184,7 +185,7 @@ class TransactionsRelationManager extends RelationManager
                 fwrite($handle, Bom::Utf8->value);
 
                 foreach ($metadataRows as $row) {
-                    fputcsv($handle, $row);
+                    fputcsv($handle, $this->csvMetadataRow($row));
                 }
 
                 fputcsv($handle, $ledgerHeaderRow);
@@ -204,7 +205,7 @@ class TransactionsRelationManager extends RelationManager
             $writer->openToBrowser("{$fileBaseName}.xlsx");
 
             foreach ($metadataRows as $row) {
-                $writer->addRow(Row::fromValues($row));
+                $writer->addRow($this->xlsxMetadataRow($row));
             }
 
             $writer->addRow(Row::fromValues($ledgerHeaderRow));
@@ -236,6 +237,41 @@ class TransactionsRelationManager extends RelationManager
                 Number::format((float) $record->amount_balance, $decimalPlaces),
             ];
         }
+    }
+
+    /**
+     * @param  array<int, mixed>  $row
+     * @return array<int, string>
+     */
+    protected function csvMetadataRow(array $row): array
+    {
+        if ($row === []) {
+            return [];
+        }
+
+        $label = (string) ($row[0] ?? '');
+        $value = (string) ($row[1] ?? '');
+
+        if (str_contains($label, 'Phone') && $value !== '—') {
+            $value = '="'.$value.'"';
+        }
+
+        return [$label, $value];
+    }
+
+    /**
+     * @param  array<int, mixed>  $row
+     */
+    protected function xlsxMetadataRow(array $row): Row
+    {
+        if ($row === []) {
+            return Row::fromValues([]);
+        }
+
+        return new Row([
+            new StringCell((string) ($row[0] ?? ''), null),
+            new StringCell((string) ($row[1] ?? ''), null),
+        ]);
     }
 
     /**
