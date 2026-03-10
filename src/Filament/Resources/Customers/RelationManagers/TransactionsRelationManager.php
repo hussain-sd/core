@@ -20,10 +20,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
 use League\Csv\Bom;
-use League\Csv\Writer as CsvWriter;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
-use SplTempFileObject;
 use SmartTill\Core\Enums\PaymentMethod;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Transactions\Tables\TransactionsTable;
@@ -161,9 +159,6 @@ class TransactionsRelationManager extends RelationManager
         $store = Filament::getTenant();
         $timezone = $store?->timezone?->name ?? config('app.timezone', 'UTC');
         $decimalPlaces = $store?->currency?->decimal_places ?? 2;
-        $records = $this->getTableQueryForExport()
-            ->with(['referenceable', 'transactionable'])
-            ->get();
 
         $metadataRows = [
             ['Store Name', $store?->business_name ?: $store?->name ?: '—'],
@@ -177,46 +172,34 @@ class TransactionsRelationManager extends RelationManager
         ];
 
         $ledgerHeaderRow = ['Date', 'Reference', 'Note', 'Type', 'Amount', 'Balance'];
-
-        $ledgerRows = $records->map(function (Transaction $record) use ($timezone, $decimalPlaces): array {
-            $referenceValue = $record->referenceable?->reference
-                ?? $record->referenceable?->local_id
-                ?? $record->referenceable_id;
-            $referenceType = filled($record->referenceable_type)
-                ? class_basename($record->referenceable_type)
-                : 'Reference';
-
-            return [
-                $record->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
-                filled($referenceValue) ? "{$referenceType} #{$referenceValue}" : '—',
-                $record->note ?: '—',
-                Str::headline((string) $record->type),
-                Number::format((float) $record->amount, $decimalPlaces),
-                Number::format((float) $record->amount_balance, $decimalPlaces),
-            ];
-        })->all();
-
         $fileBaseName = Str::slug(($store?->name ?: 'store').'-'.($customer->name ?: 'customer').'-ledger-'.now()->format('Y-m-d-His'));
 
         if ($format === 'csv') {
-            return response()->streamDownload(function () use ($metadataRows, $ledgerHeaderRow, $ledgerRows): void {
-                $csv = CsvWriter::from(new SplTempFileObject);
-                $csv->setOutputBOM(Bom::Utf8);
-
-                foreach ($metadataRows as $row) {
-                    $csv->insertOne($row);
+            return response()->streamDownload(function () use ($metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces): void {
+                $handle = fopen('php://output', 'wb');
+                if ($handle === false) {
+                    return;
                 }
 
-                $csv->insertOne($ledgerHeaderRow);
-                $csv->insertAll($ledgerRows);
+                fwrite($handle, Bom::Utf8->value);
 
-                echo $csv->toString();
+                foreach ($metadataRows as $row) {
+                    fputcsv($handle, $row);
+                }
+
+                fputcsv($handle, $ledgerHeaderRow);
+
+                foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row) {
+                    fputcsv($handle, $row);
+                }
+
+                fclose($handle);
             }, "{$fileBaseName}.csv", [
                 'Content-Type' => 'text/csv; charset=UTF-8',
             ]);
         }
 
-        return response()->streamDownload(function () use ($fileBaseName, $metadataRows, $ledgerHeaderRow, $ledgerRows): void {
+        return response()->streamDownload(function () use ($fileBaseName, $metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces): void {
             $writer = app(XlsxWriter::class);
             $writer->openToBrowser("{$fileBaseName}.xlsx");
 
@@ -226,7 +209,7 @@ class TransactionsRelationManager extends RelationManager
 
             $writer->addRow(Row::fromValues($ledgerHeaderRow));
 
-            foreach ($ledgerRows as $row) {
+            foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row) {
                 $writer->addRow(Row::fromValues($row));
             }
 
@@ -234,5 +217,50 @@ class TransactionsRelationManager extends RelationManager
         }, "{$fileBaseName}.xlsx", [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    /**
+     * @return \Generator<int, array<int, string>>
+     */
+    protected function ledgerRows(string $timezone, int $decimalPlaces): \Generator
+    {
+        $referenceCache = [];
+
+        foreach ($this->getTableQueryForExport()->orderBy('created_at')->orderBy('id')->cursor() as $record) {
+            yield [
+                $record->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
+                $this->resolveReferenceSummary($record, $referenceCache),
+                $record->note ?: '—',
+                Str::headline((string) $record->type),
+                Number::format((float) $record->amount, $decimalPlaces),
+                Number::format((float) $record->amount_balance, $decimalPlaces),
+            ];
+        }
+    }
+
+    /**
+     * @param  array<string, string>  $referenceCache
+     */
+    protected function resolveReferenceSummary(Transaction $record, array &$referenceCache): string
+    {
+        if (! filled($record->referenceable_type) || ! filled($record->referenceable_id)) {
+            return '—';
+        }
+
+        $cacheKey = $record->referenceable_type.'#'.$record->referenceable_id;
+
+        if (array_key_exists($cacheKey, $referenceCache)) {
+            return $referenceCache[$cacheKey];
+        }
+
+        $referenceType = class_basename((string) $record->referenceable_type);
+        $referenceable = $record->referenceable()->getResults();
+        $referenceValue = $referenceable?->reference
+            ?? $referenceable?->local_id
+            ?? $record->referenceable_id;
+
+        return $referenceCache[$cacheKey] = filled($referenceValue)
+            ? "{$referenceType} #{$referenceValue}"
+            : '—';
     }
 }
