@@ -54,48 +54,44 @@ class VariationObserver
 
     protected function recalculate(Variation $variation): void
     {
-        $price = $variation->price; // already cast
+        $price = $variation->price;
         if (! is_numeric($price) || $price <= 0) {
             return;
         }
 
-        // Determine dirtiness once
         $salePriceDirty = $variation->isDirty('sale_price');
         $salePercentageDirty = $variation->isDirty('sale_percentage');
 
-        // Sale (keep negative values to represent loss)
         if ($salePriceDirty && is_numeric($variation->sale_price)) {
-            $salePrice = (float) $variation->sale_price; // already cast
-            $variation->sale_percentage = (($price - $salePrice) / $price) * 100;
+            $salePrice = max(0, min((float) $variation->sale_price, (float) $price));
+            $variation->sale_price = $salePrice;
+            $variation->sale_percentage = round((($price - $salePrice) / $price) * 100, 6);
         } elseif ($salePercentageDirty && is_numeric($variation->sale_percentage)) {
-            $p = (float) $variation->sale_percentage;
-            $variation->sale_price = $price * (1 - $p / 100);
+            $percentage = max(0, min((float) $variation->sale_percentage, 100));
+            $variation->sale_percentage = round($percentage, 6);
+            $variation->sale_price = round(max(0, $price * (1 - $percentage / 100)), 6);
         }
 
-        // If both sale_price and sale_percentage are null, empty, or zero, set defaults
-        $salePriceIsNullOrZero = is_null($variation->sale_price) || $variation->sale_price === '' || (is_numeric($variation->sale_price) && (float) $variation->sale_price == 0.0);
-        $salePercentageIsNullOrZero = is_null($variation->sale_percentage) || $variation->sale_percentage === '' || (is_numeric($variation->sale_percentage) && (float) $variation->sale_percentage == 0.0);
+        $salePriceIsNullOrZero = is_null($variation->sale_price)
+            || $variation->sale_price === ''
+            || (is_numeric($variation->sale_price) && (float) $variation->sale_price == 0.0);
+        $salePercentageIsNullOrZero = is_null($variation->sale_percentage)
+            || $variation->sale_percentage === ''
+            || (is_numeric($variation->sale_percentage) && (float) $variation->sale_percentage == 0.0);
+
         if ($salePriceIsNullOrZero && $salePercentageIsNullOrZero) {
             $variation->sale_price = $price;
             $variation->sale_percentage = 0;
         }
     }
 
-    /**
-     * Invalidate product search cache for a specific store.
-     */
     protected function invalidateProductSearchCache(int $storeId): void
     {
         $cacheVersionKey = "product_search_version_{$storeId}";
-        // Initialize key if it doesn't exist (atomic operation with Redis)
         Cache::add($cacheVersionKey, 0, now()->addYears(10));
-        // Increment version to invalidate cache
         Cache::increment($cacheVersionKey);
     }
 
-    /**
-     * Invalidate individual variation cache.
-     */
     protected function invalidateVariationCache(Variation $variation): void
     {
         Cache::forget("variation_{$variation->id}");
