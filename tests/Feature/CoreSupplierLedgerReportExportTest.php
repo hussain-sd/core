@@ -5,6 +5,8 @@ it('exports supplier ledger reports with metadata rows before ledger rows', func
 
     expect($contents)
         ->toContain("Action::make('exportLedger')")
+        ->toContain("->visible(fn () => ResourceCanAccessHelper::check('Export Sales'))")
+        ->toContain("->authorize(fn () => ResourceCanAccessHelper::check('Export Sales'))")
         ->toContain("Select::make('format')")
         ->toContain("['Store Name', \$store?->business_name ?: \$store?->name ?: '—']")
         ->toContain("['Supplier Name', \$supplier->name ?: '—']")

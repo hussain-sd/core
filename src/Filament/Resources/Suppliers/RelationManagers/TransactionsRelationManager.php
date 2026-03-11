@@ -93,8 +93,8 @@ class TransactionsRelationManager extends RelationManager
                     ->label('Export Ledger')
                     ->icon(Heroicon::OutlinedArrowDownTray)
                     ->color('gray')
-                    ->visible(fn () => ResourceCanAccessHelper::check('Export Purchase Orders'))
-                    ->authorize(fn () => ResourceCanAccessHelper::check('Export Purchase Orders'))
+                    ->visible(fn () => ResourceCanAccessHelper::check('Export Sales'))
+                    ->authorize(fn () => ResourceCanAccessHelper::check('Export Sales'))
                     ->schema([
                         Select::make('format')
                             ->label('Format')
