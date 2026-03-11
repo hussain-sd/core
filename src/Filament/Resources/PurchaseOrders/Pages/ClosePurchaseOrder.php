@@ -147,18 +147,12 @@ class ClosePurchaseOrder extends Page implements HasSchemas
             $inputIsPercent = $item['received_supplier_is_percentage'] ?? null;
 
             $supplierPrice = 0.0;
-            if ($inputIsPercent === true) {
-                if (is_numeric($supplierPercentage) && $unitPrice > 0) {
-                    $supplierPrice = $unitPrice - ($unitPrice * ((float) $supplierPercentage / 100));
-                }
-            } elseif ($inputIsPercent === false) {
-                if (is_numeric($supplierPriceValue)) {
-                    $supplierPrice = (float) $supplierPriceValue;
-                }
-            } elseif (is_numeric($supplierPercentage) && $unitPrice > 0) {
-                $supplierPrice = $unitPrice - ($unitPrice * ((float) $supplierPercentage / 100));
-            } elseif (is_numeric($supplierPriceValue)) {
+            if (is_numeric($supplierPriceValue)) {
                 $supplierPrice = (float) $supplierPriceValue;
+            } elseif ($inputIsPercent === true && is_numeric($supplierPercentage) && $unitPrice > 0) {
+                $supplierPrice = round($unitPrice - ($unitPrice * ((float) $supplierPercentage / 100)), $decimalPlaces);
+            } elseif (is_numeric($supplierPercentage) && $unitPrice > 0) {
+                $supplierPrice = round($unitPrice - ($unitPrice * ((float) $supplierPercentage / 100)), $decimalPlaces);
             }
 
             $sumUnit += $qty * $unitPrice;
