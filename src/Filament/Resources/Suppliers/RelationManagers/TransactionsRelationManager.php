@@ -183,7 +183,7 @@ class TransactionsRelationManager extends RelationManager
     {
         $referenceCache = [];
 
-        foreach ($this->getTableQueryForExport()->orderBy('created_at')->orderBy('id')->cursor() as $record) {
+        foreach ($this->getTableQueryForExport()->reorder('created_at')->orderBy('id')->cursor() as $record) {
             yield [
                 $record->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
                 $this->resolveReferenceSummary($record, $referenceCache),

@@ -18,6 +18,7 @@ it('streams supplier ledger rows instead of materializing the entire ledger in m
 
     expect($contents)
         ->toContain('->cursor()')
+        ->toContain("->reorder('created_at')->orderBy('id')->cursor()")
         ->toContain('foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row)')
         ->not->toContain('->get();')
         ->not->toContain('->map(function (Transaction $record)');
