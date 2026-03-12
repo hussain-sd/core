@@ -24,8 +24,10 @@ use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use SmartTill\Core\Enums\PaymentMethod;
+use SmartTill\Core\Enums\SalePaymentStatus;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Transactions\Tables\TransactionsTable;
+use SmartTill\Core\Models\Sale;
 use SmartTill\Core\Models\Transaction;
 use SmartTill\Core\Services\PaymentService;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -226,17 +228,91 @@ class TransactionsRelationManager extends RelationManager
     protected function ledgerRows(string $timezone, int $decimalPlaces): \Generator
     {
         $referenceCache = [];
+        $transactionIterator = $this->getTableQueryForExport()
+            ->reorder('created_at')
+            ->orderBy('id')
+            ->cursor()
+            ->getIterator();
+        $saleIterator = $this->getPaidSalesQueryForExport()
+            ->cursor()
+            ->getIterator();
 
-        foreach ($this->getTableQueryForExport()->reorder('created_at')->orderBy('id')->cursor() as $record) {
+        $transactionIterator->rewind();
+        $saleIterator->rewind();
+
+        while ($transactionIterator->valid() || $saleIterator->valid()) {
+            $transaction = $transactionIterator->valid() ? $transactionIterator->current() : null;
+            $sale = $saleIterator->valid() ? $saleIterator->current() : null;
+
+            if ($this->shouldYieldTransactionFirst($transaction, $sale)) {
+                yield [
+                    $transaction->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
+                    $this->resolveReferenceSummary($transaction, $referenceCache),
+                    $transaction->note ?: '—',
+                    Str::headline((string) $transaction->type),
+                    Number::format((float) $transaction->amount, $decimalPlaces),
+                    Number::format((float) $transaction->amount_balance, $decimalPlaces),
+                ];
+
+                $transactionIterator->next();
+
+                continue;
+            }
+
             yield [
-                $record->created_at?->setTimezone($timezone)->format('M d, Y g:i A'),
-                $this->resolveReferenceSummary($record, $referenceCache),
-                $record->note ?: '—',
-                Str::headline((string) $record->type),
-                Number::format((float) $record->amount, $decimalPlaces),
-                Number::format((float) $record->amount_balance, $decimalPlaces),
+                $this->saleLedgerTimestamp($sale)?->setTimezone($timezone)->format('M d, Y g:i A'),
+                $this->resolveSaleReferenceSummary($sale),
+                $sale->note ?: 'Paid sale (informational only)',
+                'Paid Sale',
+                Number::format((float) $sale->total, $decimalPlaces),
+                '—',
             ];
+
+            $saleIterator->next();
         }
+    }
+
+    protected function getPaidSalesQueryForExport(): Builder
+    {
+        /** @var \SmartTill\Core\Models\Customer $customer */
+        $customer = $this->getOwnerRecord();
+
+        return $customer->sales()
+            ->where('payment_status', SalePaymentStatus::Paid)
+            ->orderByRaw('COALESCE(paid_at, created_at) asc')
+            ->orderBy('id');
+    }
+
+    protected function shouldYieldTransactionFirst(?Transaction $transaction, ?Sale $sale): bool
+    {
+        if ($transaction === null) {
+            return false;
+        }
+
+        if ($sale === null) {
+            return true;
+        }
+
+        $transactionTimestamp = $transaction->created_at?->getTimestamp() ?? PHP_INT_MAX;
+        $saleTimestamp = $this->saleLedgerTimestamp($sale)?->getTimestamp() ?? PHP_INT_MAX;
+
+        if ($transactionTimestamp !== $saleTimestamp) {
+            return $transactionTimestamp < $saleTimestamp;
+        }
+
+        return $transaction->id <= $sale->id;
+    }
+
+    protected function saleLedgerTimestamp(Sale $sale): ?\Illuminate\Support\Carbon
+    {
+        return $sale->paid_at ?? $sale->created_at;
+    }
+
+    protected function resolveSaleReferenceSummary(Sale $sale): string
+    {
+        $referenceValue = $sale->reference ?: ($sale->local_id ?: $sale->id);
+
+        return "Sale #{$referenceValue}";
     }
 
     /**

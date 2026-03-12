@@ -18,7 +18,10 @@ it('streams ledger rows instead of materializing the entire ledger in memory', f
 
     expect($contents)
         ->toContain('->cursor()')
-        ->toContain("->reorder('created_at')->orderBy('id')->cursor()")
+        ->toContain("->reorder('created_at')")
+        ->toContain("->orderBy('id')")
+        ->toContain("->where('payment_status', SalePaymentStatus::Paid)")
+        ->toContain("->orderByRaw('COALESCE(paid_at, created_at) asc')")
         ->toContain('foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row)')
         ->not->toContain('->get();')
         ->not->toContain('->map(function (Transaction $record)');
@@ -31,4 +34,15 @@ it('forces phone metadata to remain textual in csv and xlsx exports', function (
         ->toContain("if (str_contains(\$label, 'Phone') && \$value !== '—')")
         ->toContain("\$value = '=\"'.\$value.'\"';")
         ->toContain('new StringCell((string) ($row[1] ?? \'\'), null)');
+});
+
+it('includes paid sales in customer ledger exports without affecting balance rows', function (): void {
+    $contents = file_get_contents(__DIR__.'/../../src/Filament/Resources/Customers/RelationManagers/TransactionsRelationManager.php');
+
+    expect($contents)
+        ->toContain("'Paid Sale'")
+        ->toContain("Number::format((float) \$sale->total, \$decimalPlaces)")
+        ->toContain("'—'")
+        ->toContain("Paid sale (informational only)")
+        ->toContain('protected function resolveSaleReferenceSummary(Sale $sale): string');
 });
