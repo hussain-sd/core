@@ -6,6 +6,7 @@ it('exports customer ledger reports with metadata rows before ledger rows', func
     expect($contents)
         ->toContain("Action::make('exportLedger')")
         ->toContain("Select::make('format')")
+        ->toContain("Checkbox::make('include_paid_sales')")
         ->toContain("['Store Name', \$store?->business_name ?: \$store?->name ?: '—']")
         ->toContain("['Customer Name', \$customer->name ?: '—']")
         ->toContain("\$ledgerHeaderRow = ['Date', 'Reference', 'Note', 'Type', 'Amount', 'Balance'];")
@@ -19,11 +20,13 @@ it('streams ledger rows instead of materializing the entire ledger in memory', f
     expect($contents)
         ->toContain('->cursor()')
         ->toContain('protected function getPaidSalesQueryForExport(): HasMany')
+        ->toContain('public function downloadLedgerReport(string $format, bool $includePaidSales = false): StreamedResponse')
+        ->toContain('protected function ledgerRows(string $timezone, int $decimalPlaces, bool $includePaidSales = false): \Generator')
         ->toContain("->reorder('created_at')")
         ->toContain("->orderBy('id')")
         ->toContain("->where('payment_status', SalePaymentStatus::Paid)")
         ->toContain("->orderByRaw('COALESCE(paid_at, created_at) asc')")
-        ->toContain('foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row)')
+        ->toContain('foreach ($this->ledgerRows($timezone, $decimalPlaces, $includePaidSales) as $row)')
         ->not->toContain('->get();')
         ->not->toContain('->map(function (Transaction $record)');
 });
@@ -41,6 +44,7 @@ it('includes paid sales in customer ledger exports without affecting balance row
     $contents = file_get_contents(__DIR__.'/../../src/Filament/Resources/Customers/RelationManagers/TransactionsRelationManager.php');
 
     expect($contents)
+        ->toContain("(bool) (\$data['include_paid_sales'] ?? false)")
         ->toContain("'Paid Sale'")
         ->toContain("Number::format((float) \$sale->total, \$decimalPlaces)")
         ->toContain("'—'")

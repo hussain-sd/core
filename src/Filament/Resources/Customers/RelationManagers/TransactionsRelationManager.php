@@ -4,6 +4,7 @@ namespace SmartTill\Core\Filament\Resources\Customers\RelationManagers;
 
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -151,13 +152,20 @@ class TransactionsRelationManager extends RelationManager
                             ->default('xlsx')
                             ->required()
                             ->native(false),
+                        Checkbox::make('include_paid_sales')
+                            ->label('Include paid sales')
+                            ->helperText('Adds paid sale references to the export without changing ledger balances.')
+                            ->default(false),
                     ])
-                    ->action(fn (array $data, RelationManager $livewire) => $livewire->downloadLedgerReport($data['format'] ?? 'xlsx')),
+                    ->action(fn (array $data, RelationManager $livewire) => $livewire->downloadLedgerReport(
+                        $data['format'] ?? 'xlsx',
+                        (bool) ($data['include_paid_sales'] ?? false),
+                    )),
             ])
             ->toolbarActions([]);
     }
 
-    public function downloadLedgerReport(string $format): StreamedResponse
+    public function downloadLedgerReport(string $format, bool $includePaidSales = false): StreamedResponse
     {
         $customer = $this->getOwnerRecord();
         $store = Filament::getTenant();
@@ -179,7 +187,7 @@ class TransactionsRelationManager extends RelationManager
         $fileBaseName = Str::slug(($store?->name ?: 'store').'-'.($customer->name ?: 'customer').'-ledger-'.now()->format('Y-m-d-His'));
 
         if ($format === 'csv') {
-            return response()->streamDownload(function () use ($metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces): void {
+            return response()->streamDownload(function () use ($metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces, $includePaidSales): void {
                 $handle = fopen('php://output', 'wb');
                 if ($handle === false) {
                     return;
@@ -193,7 +201,7 @@ class TransactionsRelationManager extends RelationManager
 
                 fputcsv($handle, $ledgerHeaderRow);
 
-                foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row) {
+                foreach ($this->ledgerRows($timezone, $decimalPlaces, $includePaidSales) as $row) {
                     fputcsv($handle, $row);
                 }
 
@@ -203,7 +211,7 @@ class TransactionsRelationManager extends RelationManager
             ]);
         }
 
-        return response()->streamDownload(function () use ($fileBaseName, $metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces): void {
+        return response()->streamDownload(function () use ($fileBaseName, $metadataRows, $ledgerHeaderRow, $timezone, $decimalPlaces, $includePaidSales): void {
             $writer = app(XlsxWriter::class);
             $writer->openToBrowser("{$fileBaseName}.xlsx");
 
@@ -213,7 +221,7 @@ class TransactionsRelationManager extends RelationManager
 
             $writer->addRow(Row::fromValues($ledgerHeaderRow));
 
-            foreach ($this->ledgerRows($timezone, $decimalPlaces) as $row) {
+            foreach ($this->ledgerRows($timezone, $decimalPlaces, $includePaidSales) as $row) {
                 $writer->addRow(Row::fromValues($row));
             }
 
@@ -226,7 +234,7 @@ class TransactionsRelationManager extends RelationManager
     /**
      * @return \Generator<int, array<int, string>>
      */
-    protected function ledgerRows(string $timezone, int $decimalPlaces): \Generator
+    protected function ledgerRows(string $timezone, int $decimalPlaces, bool $includePaidSales = false): \Generator
     {
         $referenceCache = [];
         $transactionIterator = $this->getTableQueryForExport()
@@ -234,7 +242,7 @@ class TransactionsRelationManager extends RelationManager
             ->orderBy('id')
             ->cursor()
             ->getIterator();
-        $saleIterator = $this->getPaidSalesQueryForExport()
+        $saleIterator = ($includePaidSales ? $this->getPaidSalesQueryForExport() : Sale::query()->whereRaw('1 = 0'))
             ->cursor()
             ->getIterator();
 
