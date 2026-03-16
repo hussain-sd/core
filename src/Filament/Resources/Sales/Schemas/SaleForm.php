@@ -50,6 +50,57 @@ class SaleForm
         return (string) $value;
     }
 
+    public static function makePreparableVariationInstanceId(?int $saleId, mixed $variationId, int $sequence): string
+    {
+        $variationSegment = $variationId === null ? 'custom' : (string) $variationId;
+        $saleSegment = $saleId === null ? 'draft' : 'sale-'.$saleId;
+
+        return sprintf('prep-%s-%s-%d', $saleSegment, $variationSegment, $sequence);
+    }
+
+    public static function makeDraftPreparableVariationInstanceId(array $preparableVariations): string
+    {
+        return 'draft-prep-'.(self::nextDraftSequence($preparableVariations, 'draft-prep-'));
+    }
+
+    public static function makePreparableItemId(?int $saleId, ?int $databaseId, mixed $variationId, mixed $stockId, int $sequence = 0): string
+    {
+        if ($databaseId !== null) {
+            return 'prep-item-'.$databaseId;
+        }
+
+        $variationSegment = $variationId === null ? 'custom' : (string) $variationId;
+        $stockSegment = $stockId === null ? 'na' : (string) $stockId;
+        $saleSegment = $saleId === null ? 'draft' : 'sale-'.$saleId;
+
+        return sprintf('prep-item-%s-%s-%s-%d', $saleSegment, $variationSegment, $stockSegment, $sequence);
+    }
+
+    public static function makeDraftPreparableItemId(mixed $variationId, mixed $stockId): string
+    {
+        $variationSegment = $variationId === null ? 'custom' : (string) $variationId;
+        $stockSegment = $stockId === null ? 'na' : (string) $stockId;
+
+        return sprintf('draft-item-%s-%s', $variationSegment, $stockSegment);
+    }
+
+    private static function nextDraftSequence(array $items, string $prefix): int
+    {
+        $highestSequence = 0;
+
+        foreach ($items as $item) {
+            $identifier = (string) ($item['instance_id'] ?? '');
+            if (! str_starts_with($identifier, $prefix)) {
+                continue;
+            }
+
+            $suffix = (int) str_replace($prefix, '', $identifier);
+            $highestSequence = max($highestSequence, $suffix);
+        }
+
+        return $highestSequence + 1;
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -1179,7 +1230,10 @@ class SaleForm
                                                         $item['total'] = round(($item['unit_price'] * $item['quantity']) - $item['disc'], 2);
                                                         // Ensure item_id exists (for backward compatibility)
                                                         if (! isset($item['item_id'])) {
-                                                            $item['item_id'] = (string) microtime(true);
+                                                            $item['item_id'] = self::makeDraftPreparableItemId(
+                                                                $item['variation_id'] ?? null,
+                                                                $item['stock_id'] ?? null,
+                                                            );
                                                         }
                                                         $found = true;
                                                         break;
@@ -1198,7 +1252,7 @@ class SaleForm
                                                     $discountAmount = round($basePrice - $salePrice, 2);
 
                                                     $preparableItems[] = [
-                                                        'item_id' => (string) microtime(true), // Unique identifier for each item instance
+                                                        'item_id' => self::makeDraftPreparableItemId($variation->id, $barcode->id),
                                                         'variation_id' => $variation->id,
                                                         'stock_id' => $barcode->id,
                                                         'description' => $description,
@@ -1243,7 +1297,10 @@ class SaleForm
                                                     $updated = false;
                                                     foreach ($state as &$item) {
                                                         if (! isset($item['item_id']) || empty($item['item_id'])) {
-                                                            $item['item_id'] = (string) microtime(true);
+                                                            $item['item_id'] = self::makeDraftPreparableItemId(
+                                                                $item['variation_id'] ?? null,
+                                                                $item['stock_id'] ?? null,
+                                                            );
                                                             $updated = true;
                                                         }
                                                     }
@@ -1454,7 +1511,7 @@ class SaleForm
                                                         }
 
                                                         // Generate new ID if none found
-                                                        $newId = (string) microtime(true);
+                                                        $newId = self::makeDraftPreparableItemId($variationId, $stockId);
                                                         // Set it immediately so it's available for matching
                                                         $set('item_id', $newId);
 
@@ -1512,7 +1569,7 @@ class SaleForm
 
                                                         // If still no item_id, generate one (shouldn't happen, but safety net)
                                                         if (empty($currentItemId)) {
-                                                            $currentItemId = (string) microtime(true);
+                                                            $currentItemId = self::makeDraftPreparableItemId($variationId, $stockId);
                                                             $set('item_id', $currentItemId);
                                                         }
 
@@ -2720,7 +2777,10 @@ class SaleForm
             // Ensure all items in the array have item_id (for items that might have been added before item_id was implemented)
             foreach ($preparableItems as &$item) {
                 if (! isset($item['item_id']) || empty($item['item_id'])) {
-                    $item['item_id'] = (string) microtime(true);
+                    $item['item_id'] = self::makeDraftPreparableItemId(
+                        $item['variation_id'] ?? null,
+                        $item['stock_id'] ?? null,
+                    );
                 }
             }
             unset($item);
@@ -2763,7 +2823,10 @@ class SaleForm
                     }
 
                     // CRITICAL: Always preserve identifying fields to prevent item from changing
-                    $item['item_id'] = $preservedItemId ?: (string) microtime(true);
+                    $item['item_id'] = $preservedItemId ?: self::makeDraftPreparableItemId(
+                        $preservedVariationId,
+                        $preservedStockId,
+                    );
                     $item['variation_id'] = $preservedVariationId;
                     $item['stock_id'] = $preservedStockId;
                     if ($preservedDescription !== null) {
@@ -3055,7 +3118,7 @@ class SaleForm
         // Generate a unique instance_id for this preparable variation instance
         // This allows us to identify which specific instance we're working with
         // even when multiple instances have the same variation_id
-        $instanceId = 'prep_'.microtime(true).'_'.uniqid();
+        $instanceId = self::makeDraftPreparableVariationInstanceId($preparableVariations);
 
         $preparableVariations[] = [
             'instance_id' => $instanceId,

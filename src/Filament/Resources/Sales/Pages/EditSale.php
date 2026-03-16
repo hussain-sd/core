@@ -142,7 +142,13 @@ class EditSale extends EditRecord
                         : SaleForm::formatNumberForState($itemDiscount);
 
                     // Generate unique item_id for each nested item
-                    $itemId = microtime(true).'_'.$item->variation_id.'_'.$item->stock_id;
+                    $itemId = SaleForm::makePreparableItemId(
+                        $sale->id,
+                        $item->id,
+                        $item->variation_id,
+                        $item->stock_id,
+                        $sequence
+                    );
 
                     $preparableItems[] = [
                         'item_id' => $itemId,
@@ -170,7 +176,7 @@ class EditSale extends EditRecord
                 // Generate a unique instance_id for this preparable variation instance
                 // This allows us to identify which specific instance we're working with
                 // even when multiple instances have the same variation_id
-                $instanceId = 'prep_'.microtime(true).'_'.uniqid();
+                $instanceId = SaleForm::makePreparableVariationInstanceId($sale->id, $variation->id, $sequence);
 
                 $preparableVariations[] = [
                     'instance_id' => $instanceId,
