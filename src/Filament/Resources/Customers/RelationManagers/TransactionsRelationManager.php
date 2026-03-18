@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
+use SmartTill\Core\Models\Customer;
 use League\Csv\Bom;
 use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Row;
@@ -36,6 +37,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TransactionsRelationManager extends RelationManager
 {
+    public const PAID_SALE_REFERENCE_TYPE = 'paid_sale_reference';
+
     protected static string $relationship = 'transactions';
 
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
@@ -46,11 +49,14 @@ class TransactionsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return TransactionsTable::configure($table)
+            ->modifyQueryUsing(fn (Builder $query): Builder => $this->includePaidSalesInTableQuery($query))
+            ->defaultSort('created_at', 'desc')
             ->filters([
                 SelectFilter::make('type')
                     ->options([
                         'customer_debit' => 'Debit',
                         'customer_credit' => 'Credit',
+                        self::PAID_SALE_REFERENCE_TYPE => 'Paid Sale',
                     ])
                     ->multiple()
                     ->preload(),
@@ -164,6 +170,21 @@ class TransactionsRelationManager extends RelationManager
                     )),
             ])
             ->toolbarActions([]);
+    }
+
+    protected function includePaidSalesInTableQuery(Builder $query): Builder
+    {
+        $transactionsBaseQuery = (clone $query)
+            ->select('transactions.*')
+            ->getQuery();
+
+        $transactionsBaseQuery->unionAll(
+            $this->getPaidSalesQueryForTable()->getQuery()
+        );
+
+        return Transaction::query()
+            ->fromSub($transactionsBaseQuery, 'transactions')
+            ->select('transactions.*');
     }
 
     public function downloadLedgerReport(string $format, bool $includePaidSales = false): StreamedResponse
@@ -291,6 +312,31 @@ class TransactionsRelationManager extends RelationManager
             ->where('payment_status', SalePaymentStatus::Paid)
             ->orderByRaw('COALESCE(paid_at, created_at) asc')
             ->orderBy('id');
+    }
+
+    protected function getPaidSalesQueryForTable(): HasMany
+    {
+        /** @var \SmartTill\Core\Models\Customer $customer */
+        $customer = $this->getOwnerRecord();
+
+        return $customer->sales()
+            ->where('payment_status', SalePaymentStatus::Paid)
+            ->selectRaw('(1000000000 + sales.id) as id')
+            ->selectRaw('sales.store_id')
+            ->selectRaw('? as transactionable_type', [Customer::class])
+            ->selectRaw('sales.customer_id as transactionable_id')
+            ->selectRaw('? as referenceable_type', [Sale::class])
+            ->selectRaw('sales.id as referenceable_id')
+            ->selectRaw('? as type', [self::PAID_SALE_REFERENCE_TYPE])
+            ->selectRaw('sales.total as amount')
+            ->selectRaw('null as amount_balance')
+            ->selectRaw('null as quantity')
+            ->selectRaw('null as quantity_balance')
+            ->selectRaw("COALESCE(sales.note, 'Paid sale (informational only)') as note")
+            ->selectRaw('null as meta')
+            ->selectRaw('null as deleted_at')
+            ->selectRaw('COALESCE(sales.paid_at, sales.created_at) as created_at')
+            ->selectRaw('sales.updated_at as updated_at');
     }
 
     protected function hasPaidSalesForExport(): bool

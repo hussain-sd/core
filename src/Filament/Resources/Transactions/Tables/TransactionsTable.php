@@ -81,13 +81,21 @@ class TransactionsTable
                     ->label('Amount')
                     ->getStateUsing(fn ($record) => abs(self::resolveDisplayedAmount($record)))
                     ->money(fn () => Filament::getTenant()?->currency->code ?? 'PKR')
-                    ->icon(fn ($record) => self::resolveDisplayedAmount($record) > 0 ? Heroicon::OutlinedArrowUp : Heroicon::OutlinedArrowDown)
-                    ->iconColor(fn ($record) => ($record->type === 'customer_credit' || $record->type === 'supplier_debit') ? 'success' : 'danger')
-                    ->color(fn ($record) => ($record->type === 'customer_credit' || $record->type === 'supplier_debit') ? 'success' : 'danger')
+                    ->icon(fn ($record) => $record->type === CustomerTransactionsRelationManager::PAID_SALE_REFERENCE_TYPE
+                        ? Heroicon::OutlinedInformationCircle
+                        : (self::resolveDisplayedAmount($record) > 0 ? Heroicon::OutlinedArrowUp : Heroicon::OutlinedArrowDown))
+                    ->iconColor(fn ($record) => $record->type === CustomerTransactionsRelationManager::PAID_SALE_REFERENCE_TYPE
+                        ? 'info'
+                        : (($record->type === 'customer_credit' || $record->type === 'supplier_debit') ? 'success' : 'danger'))
+                    ->color(fn ($record) => $record->type === CustomerTransactionsRelationManager::PAID_SALE_REFERENCE_TYPE
+                        ? 'info'
+                        : (($record->type === 'customer_credit' || $record->type === 'supplier_debit') ? 'success' : 'danger'))
                     ->hiddenOn(TransactionsRelationManager::class),
                 TextColumn::make('amount_balance')
                     ->label('Balance')
+                    ->state(fn ($record) => $record->type === CustomerTransactionsRelationManager::PAID_SALE_REFERENCE_TYPE ? null : $record->amount_balance)
                     ->money(fn () => Filament::getTenant()?->currency->code ?? 'PKR')
+                    ->placeholder('—')
                     ->hiddenOn(TransactionsRelationManager::class),
                 TextColumn::make('quantity')
                     ->label('Quantity')
