@@ -28,17 +28,14 @@ it('renders the customer transactions table with ledger-style reference values a
         ->toContain("->prefix('#')")
         ->toContain("->formatStateUsing(fn (Transaction \$record) => \$record->referenceable?->reference ?? \$record->referenceable_id)")
         ->toContain("SaleResource::getUrl('view', ['record' => \$record->referenceable])")
-        ->toContain("TextColumn::make('type')")
-        ->toContain("->formatStateUsing(fn (string \$state): string => \$state === self::PAID_SALE_REFERENCE_TYPE ? 'Paid Sale' : Str::headline(\$state))")
-        ->toContain("'customer_credit' => 'success'")
-        ->toContain("'customer_debit' => 'danger'")
         ->toContain("TextColumn::make('amount_balance')")
         ->toContain("->state(fn (Transaction \$record) => \$record->type === self::PAID_SALE_REFERENCE_TYPE ? null : \$record->amount_balance)")
         ->toContain("TextColumn::make('amount')")
         ->toContain("->getStateUsing(fn (Transaction \$record): float => abs((float) \$record->amount))")
         ->toContain("default => null,")
         ->toContain("\$referenceValue = \$sale->reference ?: \$sale->id;")
-        ->not->toContain("\$referenceable?->local_id");
+        ->not->toContain("\$referenceable?->local_id")
+        ->not->toContain("TextColumn::make('type')");
 });
 
 it('renders paid sale references as informational rows without a balance amount', function (): void {

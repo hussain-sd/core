@@ -72,16 +72,6 @@ class TransactionsRelationManager extends RelationManager
                     }),
                 TextColumn::make('note')
                     ->placeholder('—'),
-                TextColumn::make('type')
-                    ->label('Type')
-                    ->formatStateUsing(fn (string $state): string => $state === self::PAID_SALE_REFERENCE_TYPE ? 'Paid Sale' : Str::headline($state))
-                    ->color(function (string $state): ?string {
-                        return match ($state) {
-                            'customer_credit' => 'success',
-                            'customer_debit' => 'danger',
-                            default => null,
-                        };
-                    }),
                 TextColumn::make('created_at')
                     ->label('Created at')
                     ->since()
