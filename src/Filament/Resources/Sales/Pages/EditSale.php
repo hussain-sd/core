@@ -70,7 +70,7 @@ class EditSale extends EditRecord
     protected function mutateFormDataBeforeFill(array $data): array
     {
         $sale = $this->getRecord();
-        $sale->loadMissing(['variations', 'preparableItems', 'store.currency']);
+        $sale->loadMissing(['preparableItems', 'store.currency']);
         $multiplier = $sale->currencyMultiplier();
 
         // Separate regular variations from preparable variations
@@ -89,28 +89,36 @@ class EditSale extends EditRecord
         // Track sequence per variation_id to match correctly
         $sequenceByVariationId = [];
 
-        foreach ($sale->variations as $variation) {
-            $pivot = $variation->pivot;
-            $isPreparable = $pivot->is_preparable ?? false;
+        $saleVariationRows = DB::table('sale_variation')
+            ->where('sale_id', $sale->id)
+            ->whereNotNull('variation_id')
+            ->orderBy('is_preparable')
+            ->orderBy('variation_id')
+            ->orderBy('stock_id')
+            ->orderBy('description')
+            ->get();
+
+        foreach ($saleVariationRows as $saleVariationRow) {
+            $isPreparable = (bool) ($saleVariationRow->is_preparable ?? false);
 
             if ($isPreparable) {
                 // Load preparable variation
-                $description = $pivot->description;
-                $qty = $pivot->quantity;
-                $price = $pivot->unit_price;
-                $tax = $pivot->tax;
-                $discount = $pivot->discount;
-                $total = $pivot->total;
-                $discountType = $pivot->discount_type ?? 'flat';
+                $description = $saleVariationRow->description;
+                $qty = (float) ($saleVariationRow->quantity ?? 1);
+                $price = (float) ($saleVariationRow->unit_price ?? 0) / $multiplier;
+                $tax = (float) ($saleVariationRow->tax ?? 0) / $multiplier;
+                $discount = (float) ($saleVariationRow->discount ?? 0) / $multiplier;
+                $total = (float) ($saleVariationRow->total ?? 0) / $multiplier;
+                $discountType = $saleVariationRow->discount_type ?? 'flat';
                 if ($discountType === 'percent') {
                     $discountType = 'percentage';
                 }
-                $discountPercentage = $pivot->discount_percentage ?? null;
+                $discountPercentage = $saleVariationRow->discount_percentage ?? null;
                 $unitDiscount = $qty != 0 ? round((float) $discount / (float) $qty, 2) : 0;
 
                 // Determine sequence for this variation_id instance
                 // Sequence is per variation_id, so we track it per variation_id
-                $variationId = $variation->id;
+                $variationId = (int) $saleVariationRow->variation_id;
                 if (! isset($sequenceByVariationId[$variationId])) {
                     $sequenceByVariationId[$variationId] = 0;
                 }
@@ -180,10 +188,10 @@ class EditSale extends EditRecord
 
                 $preparableVariations[] = [
                     'instance_id' => $instanceId,
-                    'variation_id' => $variation->id,
-                    'stock_id' => $pivot->stock_id ?? null,
+                    'variation_id' => $variationId,
+                    'stock_id' => $saleVariationRow->stock_id ?? null,
                     'description' => $description,
-                    'qty' => (float) $qty,
+                    'qty' => $qty,
                     'price' => round((float) $price, 2),
                     'tax' => round((float) $tax, 2),
                     'unit_discount' => $unitDiscount,
@@ -196,18 +204,18 @@ class EditSale extends EditRecord
                 ];
             } else {
                 // Regular variation
-                $description = $pivot->description;
-                $quantity = $pivot->quantity;
-                $unitPrice = $pivot->unit_price;
-                $tax = $pivot->tax;
-                $discountAmount = $pivot->discount;
-                $total = $pivot->total;
-                $supplierPrice = $pivot->supplier_price;
-                $discountType = $pivot->discount_type ?? 'flat';
+                $description = $saleVariationRow->description;
+                $quantity = (float) ($saleVariationRow->quantity ?? 1);
+                $unitPrice = (float) ($saleVariationRow->unit_price ?? 0) / $multiplier;
+                $tax = (float) ($saleVariationRow->tax ?? 0) / $multiplier;
+                $discountAmount = (float) ($saleVariationRow->discount ?? 0) / $multiplier;
+                $total = (float) ($saleVariationRow->total ?? 0) / $multiplier;
+                $supplierPrice = (float) ($saleVariationRow->supplier_price ?? 0) / $multiplier;
+                $discountType = $saleVariationRow->discount_type ?? 'flat';
                 if ($discountType === 'percent') {
                     $discountType = 'percentage';
                 }
-                $discountPercentage = $pivot->discount_percentage ?? null;
+                $discountPercentage = $saleVariationRow->discount_percentage ?? null;
                 $unitDiscount = $quantity != 0 ? round((float) $discountAmount / (float) $quantity, 2) : 0;
 
                 $discountDisplay = $discountType === 'percentage' && $discountPercentage !== null
@@ -215,8 +223,8 @@ class EditSale extends EditRecord
                     : SaleForm::formatNumberForState((float) $discountAmount);
 
                 $variations[] = [
-                    'variation_id' => $variation->id,
-                    'stock_id' => $pivot->stock_id ?? null,
+                    'variation_id' => (int) $saleVariationRow->variation_id,
+                    'stock_id' => $saleVariationRow->stock_id ?? null,
                     'description' => $description,
                     'quantity' => $quantity,
                     'unit_price' => $unitPrice,

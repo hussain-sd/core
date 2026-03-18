@@ -3441,22 +3441,22 @@ class SaleForm
                 if (! empty($state['sale_id'])) {
                     // Update existing sale
                     $sale = Sale::findOrFail($state['sale_id']);
-                    $sale->loadMissing('variations');
-
                     // Capture old state for transaction reversal
                     $oldStatus = $sale->status;
                     $oldPaymentStatus = $sale->payment_status;
                     $oldTotal = $sale->total;
                     $oldCustomerId = $sale->customer_id; // Capture old customer ID before update
-                    $oldVariations = [];
-                    foreach ($sale->variations as $variation) {
-                        $oldVariations[] = [
-                            'variation_id' => $variation->id,
-                            'stock_id' => $variation->pivot->stock_id ?? null,
-                            'quantity' => $variation->pivot->quantity,
-                            'is_preparable' => (bool) ($variation->pivot->is_preparable ?? false),
-                        ];
-                    }
+                    $oldVariations = DB::table('sale_variation')
+                        ->where('sale_id', $sale->id)
+                        ->whereNotNull('variation_id')
+                        ->get()
+                        ->map(fn ($saleVariationRow): array => [
+                            'variation_id' => (int) $saleVariationRow->variation_id,
+                            'stock_id' => $saleVariationRow->stock_id ?? null,
+                            'quantity' => (float) ($saleVariationRow->quantity ?? 0),
+                            'is_preparable' => (bool) ($saleVariationRow->is_preparable ?? false),
+                        ])
+                        ->all();
 
                     // Ensure payment_status is an enum instance
                     $paymentStatusValue = $state['payment_status'] ?? SalePaymentStatus::default();
@@ -3533,7 +3533,8 @@ class SaleForm
                             }
                         }
 
-                        $syncData[$variation['variation_id']] = [
+                        $syncData[] = [
+                            'variation_id' => $variation['variation_id'],
                             'stock_id' => $variation['stock_id'] ?? null,
                             'description' => $variation['description'],
                             'quantity' => $variation['quantity'],
@@ -3561,10 +3562,10 @@ class SaleForm
 
                     // Insert regular variations directly using DB to bypass PriceCast issues with pivot models
                     // PriceCast can't resolve store during sync/attach, so we multiply manually
-                    foreach ($syncData as $variationId => $data) {
+                    foreach ($syncData as $data) {
                         DB::table('sale_variation')->insert([
                             'sale_id' => $sale->id,
-                            'variation_id' => $variationId,
+                            'variation_id' => $data['variation_id'],
                             'stock_id' => $data['stock_id'],
                             'description' => $data['description'],
                             'quantity' => $data['quantity'],
@@ -3683,7 +3684,7 @@ class SaleForm
 
                     // Save new preparable items
                     if (! empty($preparableVariations) && is_array($preparableVariations)) {
-                        foreach ($preparableVariations as $sequence => $preparableVariation) {
+                        foreach (array_values($preparableVariations) as $sequence => $preparableVariation) {
                             $preparableVariationId = $preparableVariation['variation_id'] ?? null;
                             if (! $preparableVariationId) {
                                 continue;
@@ -3976,7 +3977,7 @@ class SaleForm
                     // Save preparable items
                     $preparableVariations = $state['preparable_variations'] ?? [];
                     if (! empty($preparableVariations) && is_array($preparableVariations)) {
-                        foreach ($preparableVariations as $sequence => $preparableVariation) {
+                        foreach (array_values($preparableVariations) as $sequence => $preparableVariation) {
                             $preparableVariationId = $preparableVariation['variation_id'] ?? null;
                             if (! $preparableVariationId) {
                                 continue;
