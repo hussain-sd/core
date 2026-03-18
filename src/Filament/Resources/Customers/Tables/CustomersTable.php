@@ -16,13 +16,16 @@ use Filament\Facades\Filament;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use SmartTill\Core\Filament\Resources\Helpers\SyncReferenceColumn;
+use SmartTill\Core\Models\Customer;
 
 class CustomersTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withPendingBalance())
             ->columns([
                 SyncReferenceColumn::make(),
                 TextColumn::make('name')
@@ -32,6 +35,19 @@ class CustomersTable
                 TextColumn::make('email')
                     ->label('Email address')
                     ->searchable(),
+                TextColumn::make('pending_balance_raw')
+                    ->label('Balance')
+                    ->state(function (Customer $record): string {
+                        $store = Filament::getTenant();
+                        $decimalPlaces = $store?->currency?->decimal_places ?? 2;
+                        $multiplier = (int) pow(10, $decimalPlaces);
+                        $pendingBalanceRaw = max(0, (float) ($record->pending_balance_raw ?? 0));
+                        $pendingBalance = $multiplier > 0 ? ($pendingBalanceRaw / $multiplier) : $pendingBalanceRaw;
+                        $currencyCode = $store?->currency?->code ?? 'PKR';
+
+                        return $currencyCode.' '.number_format($pendingBalance, $decimalPlaces, '.', ',');
+                    })
+                    ->sortable(),
                 TextColumn::make('status')
                     ->badge()
                     ->searchable(),
