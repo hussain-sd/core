@@ -12,7 +12,10 @@ it('includes paid sale references in the customer transactions relation manager 
         ->toContain("(1000000000 + sales.id) as id")
         ->toContain("null as local_id")
         ->toContain("null as reference")
-        ->toContain("COALESCE(sales.note, 'Paid sale (informational only)') as note");
+        ->toContain("COALESCE(sales.note, 'Paid sale (informational only)') as note")
+        ->toContain("->selectRaw('sales.updated_at as updated_at')")
+        ->toContain("->selectRaw('null as local_id')")
+        ->toContain("->selectRaw('null as reference');");
 });
 
 it('renders the customer transactions table with ledger-style reference values and without local ids', function (): void {
