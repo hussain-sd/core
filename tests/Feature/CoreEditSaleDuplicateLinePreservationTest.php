@@ -6,6 +6,10 @@ it('loads edit sale lines from sale_variation rows instead of collapsing through
     expect($contents)
         ->toContain("DB::table('sale_variation')")
         ->toContain("->whereNotNull('variation_id')")
+        ->toContain('$regularVariationRows = [];')
+        ->toContain('$this->collapseRegularVariationRows(collect($regularVariationRows), $multiplier)')
+        ->toContain('protected function collapseRegularVariationRows(Collection $saleVariationRows, float $multiplier): array')
+        ->toContain("->groupBy(function (object \$saleVariationRow): string")
         ->not->toContain('foreach ($sale->variations as $variation)');
 });
 

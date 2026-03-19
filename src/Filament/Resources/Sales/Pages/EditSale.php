@@ -5,6 +5,7 @@ namespace SmartTill\Core\Filament\Resources\Sales\Pages;
 use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use SmartTill\Core\Enums\SaleStatus;
 use SmartTill\Core\Filament\Resources\Sales\SaleResource;
@@ -98,6 +99,8 @@ class EditSale extends EditRecord
             ->orderBy('description')
             ->get();
 
+        $regularVariationRows = [];
+
         foreach ($saleVariationRows as $saleVariationRow) {
             $isPreparable = (bool) ($saleVariationRow->is_preparable ?? false);
 
@@ -184,7 +187,7 @@ class EditSale extends EditRecord
                 // Generate a unique instance_id for this preparable variation instance
                 // This allows us to identify which specific instance we're working with
                 // even when multiple instances have the same variation_id
-                $instanceId = SaleForm::makePreparableVariationInstanceId($sale->id, $variation->id, $sequence);
+                $instanceId = SaleForm::makePreparableVariationInstanceId($sale->id, $variationId, $sequence);
 
                 $preparableVariations[] = [
                     'instance_id' => $instanceId,
@@ -203,42 +206,14 @@ class EditSale extends EditRecord
                     'preparable_items' => $preparableItems,
                 ];
             } else {
-                // Regular variation
-                $description = $saleVariationRow->description;
-                $quantity = (float) ($saleVariationRow->quantity ?? 1);
-                $unitPrice = (float) ($saleVariationRow->unit_price ?? 0) / $multiplier;
-                $tax = (float) ($saleVariationRow->tax ?? 0) / $multiplier;
-                $discountAmount = (float) ($saleVariationRow->discount ?? 0) / $multiplier;
-                $total = (float) ($saleVariationRow->total ?? 0) / $multiplier;
-                $supplierPrice = (float) ($saleVariationRow->supplier_price ?? 0) / $multiplier;
-                $discountType = $saleVariationRow->discount_type ?? 'flat';
-                if ($discountType === 'percent') {
-                    $discountType = 'percentage';
-                }
-                $discountPercentage = $saleVariationRow->discount_percentage ?? null;
-                $unitDiscount = $quantity != 0 ? round((float) $discountAmount / (float) $quantity, 2) : 0;
-
-                $discountDisplay = $discountType === 'percentage' && $discountPercentage !== null
-                    ? SaleForm::formatPercentage((float) $discountPercentage)
-                    : SaleForm::formatNumberForState((float) $discountAmount);
-
-                $variations[] = [
-                    'variation_id' => (int) $saleVariationRow->variation_id,
-                    'stock_id' => $saleVariationRow->stock_id ?? null,
-                    'description' => $description,
-                    'quantity' => $quantity,
-                    'unit_price' => $unitPrice,
-                    'tax' => $tax,
-                    'unit_discount' => $unitDiscount,
-                    'discount' => $discountDisplay,
-                    'discount_amount' => round((float) $discountAmount, 2),
-                    'discount_type' => $discountType,
-                    'discount_percentage' => $discountPercentage,
-                    'total' => $total,
-                    'supplier_price' => $supplierPrice,
-                ];
+                $regularVariationRows[] = $saleVariationRow;
             }
         }
+
+        $variations = array_merge(
+            $variations,
+            $this->collapseRegularVariationRows(collect($regularVariationRows), $multiplier),
+        );
 
         $customVariations = DB::table('sale_variation')
             ->where('sale_id', $sale->id)
@@ -339,5 +314,65 @@ class EditSale extends EditRecord
         $data['sale_id'] = $sale->id;
 
         return $data;
+    }
+
+    /**
+     * @param  Collection<int, object>  $saleVariationRows
+     * @return array<int, array<string, float|int|string|null>>
+     */
+    protected function collapseRegularVariationRows(Collection $saleVariationRows, float $multiplier): array
+    {
+        return $saleVariationRows
+            ->groupBy(function (object $saleVariationRow): string {
+                return implode('|', [
+                    (string) $saleVariationRow->variation_id,
+                    (string) ($saleVariationRow->description ?? ''),
+                    (string) ($saleVariationRow->unit_price ?? 0),
+                    (string) ($saleVariationRow->discount_type ?? 'flat'),
+                    (string) ($saleVariationRow->discount_percentage ?? ''),
+                ]);
+            })
+            ->map(function (Collection $group) use ($multiplier): array {
+                $firstRow = $group->first();
+                $quantity = (float) $group->sum(fn (object $row): float => (float) ($row->quantity ?? 0));
+                $tax = (float) $group->sum(fn (object $row): float => (float) ($row->tax ?? 0)) / $multiplier;
+                $discountAmount = (float) $group->sum(fn (object $row): float => (float) ($row->discount ?? 0)) / $multiplier;
+                $total = (float) $group->sum(fn (object $row): float => (float) ($row->total ?? 0)) / $multiplier;
+                $supplierTotal = (float) $group->sum(
+                    fn (object $row): float => (float) (($row->supplier_total ?? 0) ?: ((float) ($row->supplier_price ?? 0) * (float) ($row->quantity ?? 0)))
+                ) / $multiplier;
+                $supplierPrice = $quantity != 0
+                    ? round($supplierTotal / $quantity, 2)
+                    : round((float) ($firstRow->supplier_price ?? 0) / $multiplier, 2);
+
+                $discountType = $firstRow->discount_type ?? 'flat';
+                if ($discountType === 'percent') {
+                    $discountType = 'percentage';
+                }
+
+                $discountPercentage = $firstRow->discount_percentage ?? null;
+                $unitDiscount = $quantity != 0 ? round($discountAmount / $quantity, 2) : 0;
+                $discountDisplay = $discountType === 'percentage' && $discountPercentage !== null
+                    ? SaleForm::formatPercentage((float) $discountPercentage)
+                    : SaleForm::formatNumberForState((float) $discountAmount);
+
+                return [
+                    'variation_id' => (int) $firstRow->variation_id,
+                    'stock_id' => $group->count() === 1 ? ($firstRow->stock_id ?? null) : null,
+                    'description' => $firstRow->description,
+                    'quantity' => $quantity,
+                    'unit_price' => round((float) ($firstRow->unit_price ?? 0) / $multiplier, 2),
+                    'tax' => round($tax, 2),
+                    'unit_discount' => $unitDiscount,
+                    'discount' => $discountDisplay,
+                    'discount_amount' => round($discountAmount, 2),
+                    'discount_type' => $discountType,
+                    'discount_percentage' => $discountPercentage,
+                    'total' => round($total, 2),
+                    'supplier_price' => $supplierPrice,
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

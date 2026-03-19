@@ -20,7 +20,12 @@ it('builds stable identifiers for draft preparable rows', function (): void {
     ]))->toBe('draft-prep-5');
 
     expect(SaleForm::makeDraftPreparableItemId(91, 12))
-        ->toBe('draft-item-91-12');
+        ->toBe('draft-item-91-12-1');
+
+    expect(SaleForm::makeDraftPreparableItemId(91, 12, [
+        ['item_id' => 'draft-item-91-12-1'],
+        ['item_id' => 'draft-item-91-12-4'],
+    ]))->toBe('draft-item-91-12-5');
 });
 
 it('does not use random time based identifiers in sales form state', function (): void {
@@ -31,11 +36,13 @@ it('does not use random time based identifiers in sales form state', function ()
         ->not->toContain('microtime(')
         ->not->toContain('uniqid(')
         ->toContain('SaleForm::makePreparableVariationInstanceId')
-        ->toContain('SaleForm::makePreparableItemId');
+        ->toContain('SaleForm::makePreparableItemId')
+        ->toContain('makePreparableVariationInstanceId($sale->id, $variationId, $sequence)');
 
     expect($saleFormContents)
         ->not->toContain('microtime(')
         ->not->toContain('uniqid(')
         ->toContain('makeDraftPreparableVariationInstanceId')
-        ->toContain('makeDraftPreparableItemId');
+        ->toContain('makeDraftPreparableItemId')
+        ->toContain('nextDraftItemSequence');
 });
