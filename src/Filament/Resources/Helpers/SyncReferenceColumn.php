@@ -14,7 +14,7 @@ class SyncReferenceColumn
      */
     private static array $searchableColumnsCache = [];
 
-    public static function make(): TextColumn
+    public static function make(bool $isToggledHiddenByDefault = true): TextColumn
     {
         return TextColumn::make('reference')
             ->label('Reference')
@@ -47,7 +47,7 @@ class SyncReferenceColumn
                 });
             })
             ->sortable()
-            ->toggleable(isToggledHiddenByDefault: true);
+            ->toggleable(isToggledHiddenByDefault: $isToggledHiddenByDefault);
     }
 
     /**

@@ -35,7 +35,7 @@ class SalesTable
     {
         return $table
             ->columns([
-                SyncReferenceColumn::make(),
+                SyncReferenceColumn::make(isToggledHiddenByDefault: false),
                 TextColumn::make('customer')
                     ->label('Customer')
                     ->getStateUsing(fn ($record) => $record->customer?->name ?? 'Guest')
