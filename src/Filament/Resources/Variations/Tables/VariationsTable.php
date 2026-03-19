@@ -29,10 +29,10 @@ class VariationsTable
             ])
             ->columns([
                 SyncReferenceColumn::make(),
-                TextColumn::make('description')
-                    ->searchable(),
                 TextColumn::make('sku')
                     ->label('SKU')
+                    ->searchable(),
+                TextColumn::make('description')
                     ->searchable(),
                 TextColumn::make('price')
                     ->money(fn () => Filament::getTenant()?->currency?->code ?? 'PKR')
