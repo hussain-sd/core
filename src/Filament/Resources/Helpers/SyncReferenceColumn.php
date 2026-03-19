@@ -46,7 +46,8 @@ class SyncReferenceColumn
                     return $innerQuery;
                 });
             })
-            ->sortable();
+            ->sortable()
+            ->toggleable(isToggledHiddenByDefault: true);
     }
 
     /**
