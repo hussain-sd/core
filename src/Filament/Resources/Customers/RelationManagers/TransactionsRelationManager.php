@@ -20,6 +20,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
 use SmartTill\Core\Models\Customer;
@@ -231,17 +232,19 @@ class TransactionsRelationManager extends RelationManager
 
     protected function includePaidSalesInTableQuery(Builder $query): Builder
     {
+        $columns = $this->transactionTableColumns();
+
         $transactionsBaseQuery = (clone $query)
-            ->select('transactions.*')
+            ->select($this->qualifyTransactionColumns($columns))
             ->getQuery();
 
         $transactionsBaseQuery->unionAll(
-            $this->getPaidSalesQueryForTable()->getQuery()
+            $this->getPaidSalesQueryForTable($columns)->getQuery()
         );
 
         return Transaction::query()
             ->fromSub($transactionsBaseQuery, 'transactions')
-            ->select('transactions.*');
+            ->select($this->qualifyTransactionColumns($columns));
     }
 
     public function downloadLedgerReport(string $format, bool $includePaidSales = false): StreamedResponse
@@ -371,31 +374,60 @@ class TransactionsRelationManager extends RelationManager
             ->orderBy('id');
     }
 
-    protected function getPaidSalesQueryForTable(): HasMany
+    /**
+     * @param  array<int, string>  $columns
+     */
+    protected function getPaidSalesQueryForTable(array $columns): HasMany
     {
         /** @var \SmartTill\Core\Models\Customer $customer */
         $customer = $this->getOwnerRecord();
 
-        return $customer->sales()
-            ->where('payment_status', SalePaymentStatus::Paid)
-            ->selectRaw('(1000000000 + sales.id) as id')
-            ->selectRaw('sales.store_id')
-            ->selectRaw('? as transactionable_type', [Customer::class])
-            ->selectRaw('sales.customer_id as transactionable_id')
-            ->selectRaw('? as referenceable_type', [Sale::class])
-            ->selectRaw('sales.id as referenceable_id')
-            ->selectRaw('? as type', [self::PAID_SALE_REFERENCE_TYPE])
-            ->selectRaw('sales.total as amount')
-            ->selectRaw('null as amount_balance')
-            ->selectRaw('null as quantity')
-            ->selectRaw('null as quantity_balance')
-            ->selectRaw("COALESCE(sales.note, 'Paid sale (informational only)') as note")
-            ->selectRaw('null as meta')
-            ->selectRaw('null as deleted_at')
-            ->selectRaw('COALESCE(sales.paid_at, sales.created_at) as created_at')
-            ->selectRaw('sales.updated_at as updated_at')
-            ->selectRaw('null as local_id')
-            ->selectRaw('null as reference');
+        $query = $customer->sales()
+            ->where('payment_status', SalePaymentStatus::Paid);
+
+        foreach ($columns as $column) {
+            match ($column) {
+                'id' => $query->selectRaw('(1000000000 + sales.id) as id'),
+                'store_id' => $query->selectRaw('sales.store_id'),
+                'transactionable_type' => $query->selectRaw('? as transactionable_type', [Customer::class]),
+                'transactionable_id' => $query->selectRaw('sales.customer_id as transactionable_id'),
+                'referenceable_type' => $query->selectRaw('? as referenceable_type', [Sale::class]),
+                'referenceable_id' => $query->selectRaw('sales.id as referenceable_id'),
+                'type' => $query->selectRaw('? as type', [self::PAID_SALE_REFERENCE_TYPE]),
+                'amount' => $query->selectRaw('sales.total as amount'),
+                'amount_balance' => $query->selectRaw('null as amount_balance'),
+                'quantity' => $query->selectRaw('null as quantity'),
+                'quantity_balance' => $query->selectRaw('null as quantity_balance'),
+                'note' => $query->selectRaw("COALESCE(sales.note, 'Paid sale (informational only)') as note"),
+                'meta' => $query->selectRaw('null as meta'),
+                'deleted_at' => $query->selectRaw('null as deleted_at'),
+                'created_at' => $query->selectRaw('COALESCE(sales.paid_at, sales.created_at) as created_at'),
+                'updated_at' => $query->selectRaw('sales.updated_at as updated_at'),
+                default => $query->selectRaw("null as {$column}"),
+            };
+        }
+
+        return $query;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function transactionTableColumns(): array
+    {
+        return Schema::getColumnListing('transactions');
+    }
+
+    /**
+     * @param  array<int, string>  $columns
+     * @return array<int, string>
+     */
+    protected function qualifyTransactionColumns(array $columns): array
+    {
+        return array_map(
+            static fn (string $column): string => "transactions.{$column}",
+            $columns,
+        );
     }
 
     protected function hasPaidSalesForExport(): bool
