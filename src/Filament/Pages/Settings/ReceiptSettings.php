@@ -5,6 +5,7 @@ namespace SmartTill\Core\Filament\Pages\Settings;
 use App\Models\Store;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Notifications\Notification;
@@ -53,6 +54,8 @@ class ReceiptSettings extends Page
             'show_differences' => $settingsService->getShowDifferencesInReceipt($store),
             'show_header_note' => $settingsService->getShowHeaderNoteInReceipt($store),
             'show_footer_note' => $settingsService->getShowFooterNoteInReceipt($store),
+            'header_note_label' => $settingsService->getHeaderNoteLabel($store),
+            'footer_note_label' => $settingsService->getFooterNoteLabel($store),
         ]);
     }
 
@@ -78,8 +81,18 @@ class ReceiptSettings extends Page
                     ->schema([
                         Toggle::make('show_header_note')
                             ->label('Show Header Note'),
+                        TextInput::make('header_note_label')
+                            ->label('Header Note Label')
+                            ->maxLength(50)
+                            ->required()
+                            ->default('Header Note'),
                         Toggle::make('show_footer_note')
                             ->label('Show Footer Note'),
+                        TextInput::make('footer_note_label')
+                            ->label('Footer Note Label')
+                            ->maxLength(50)
+                            ->required()
+                            ->default('Footer Note'),
                     ]),
             ]);
     }
@@ -100,6 +113,8 @@ class ReceiptSettings extends Page
         $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_SHOW_DIFFERENCES, (bool) ($data['show_differences'] ?? false), 'dropdown');
         $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_SHOW_HEADER_NOTE, (bool) ($data['show_header_note'] ?? true), 'dropdown');
         $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_SHOW_FOOTER_NOTE, (bool) ($data['show_footer_note'] ?? true), 'dropdown');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_HEADER_NOTE_LABEL, $data['header_note_label'] ?? 'Header Note', 'string');
+        $settingsService->setSetting($store, CoreStoreSettingsService::SETTING_RECEIPT_FOOTER_NOTE_LABEL, $data['footer_note_label'] ?? 'Footer Note', 'string');
 
         Notification::make()
             ->title('Receipt settings saved')

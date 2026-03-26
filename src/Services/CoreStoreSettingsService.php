@@ -22,6 +22,10 @@ class CoreStoreSettingsService
 
     public const SETTING_RECEIPT_SHOW_FOOTER_NOTE = 'RECEIPT_SHOW_FOOTER_NOTE';
 
+    public const SETTING_RECEIPT_HEADER_NOTE_LABEL = 'RECEIPT_HEADER_NOTE_LABEL';
+
+    public const SETTING_RECEIPT_FOOTER_NOTE_LABEL = 'RECEIPT_FOOTER_NOTE_LABEL';
+
     public const SETTING_TAX_ENABLED = 'TAX_ENABLED';
 
     public const SETTING_FBR_ENVIRONMENT = 'FBR_ENVIRONMENT';
@@ -165,6 +169,18 @@ class CoreStoreSettingsService
         );
     }
 
+    public function getHeaderNoteLabel(Model $store): string
+    {
+        return $this->getSettingValue($store, self::SETTING_RECEIPT_HEADER_NOTE_LABEL)
+            ?? 'Header Note';
+    }
+
+    public function getFooterNoteLabel(Model $store): string
+    {
+        return $this->getSettingValue($store, self::SETTING_RECEIPT_FOOTER_NOTE_LABEL)
+            ?? 'Footer Note';
+    }
+
     public function getFbrEnvironment(Model $store): string
     {
         $value = $this->getSettingValue($store, self::SETTING_FBR_ENVIRONMENT);
@@ -236,6 +252,7 @@ class CoreStoreSettingsService
     {
         return match ($key) {
             self::SETTING_FBR_SANDBOX_POS_ID, self::SETTING_FBR_POS_ID => 'number',
+            self::SETTING_RECEIPT_HEADER_NOTE_LABEL, self::SETTING_RECEIPT_FOOTER_NOTE_LABEL => 'string',
             self::SETTING_FBR_BEARER_TOKEN => 'text_area',
             default => 'dropdown',
         };
@@ -266,6 +283,14 @@ class CoreStoreSettingsService
             self::SETTING_RECEIPT_SHOW_FOOTER_NOTE => [
                 'value' => '1',
                 'type' => 'dropdown',
+            ],
+            self::SETTING_RECEIPT_HEADER_NOTE_LABEL => [
+                'value' => 'Header Note',
+                'type' => 'string',
+            ],
+            self::SETTING_RECEIPT_FOOTER_NOTE_LABEL => [
+                'value' => 'Footer Note',
+                'type' => 'string',
             ],
             self::SETTING_TAX_ENABLED => [
                 'value' => ((bool) ($store->getAttribute('tax_enabled') ?? false)) ? '1' : '0',
