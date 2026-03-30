@@ -29,6 +29,7 @@ it('defines a pricing importer that updates variation pricing fields only', func
         ->toContain("ImportColumn::make('price')")
         ->toContain("ImportColumn::make('sale_price')")
         ->not->toContain("ImportColumn::make('sale_percentage')")
+        ->toContain("->fillRecordUsing(fn (): null => null)")
         ->toContain('parent::fillRecord();')
         ->toContain("\$this->record->price = (float) (\$this->data['price'] ?? 0);")
         ->not->toContain("ImportColumn::make('stock')")
@@ -42,6 +43,27 @@ it('relies on the variation observer to derive sale percentage from sale price',
     expect($contents)
         ->toContain("\$record->sale_price = (float) \$state;")
         ->not->toContain("\$record->sale_percentage = round((float) \$state, 6);");
+});
+
+it('fails pricing imports when no variation match is found instead of silently succeeding', function (): void {
+    $contents = file_get_contents(dirname(__DIR__, 2).'/src/Filament/Imports/VariationPricingImporter.php');
+
+    expect($contents)
+        ->toContain("if (\$variations->isEmpty()) {")
+        ->toContain('No variation found for this SKU in the current store.')
+        ->toContain('No variation matched this pricing row. Please verify SKU, brand, and description.');
+});
+
+it('resolves pricing imports by sku brand and description matching', function (): void {
+    $contents = file_get_contents(dirname(__DIR__, 2).'/src/Filament/Imports/VariationPricingImporter.php');
+
+    expect($contents)
+        ->toContain("->where('store_id', \$storeId)")
+        ->toContain("->where('sku', \$sku)")
+        ->toContain("trim((string) \$variation->product?->brand?->name) === \$brand")
+        ->toContain("trim((string) \$variation->description) === \$description")
+        ->not->toContain("trim((string) \$variation->product?->category?->name) === \$category")
+        ->toContain('Multiple variations matched this SKU, brand, and description. Please make the row more specific.');
 });
 
 it('adds separate variation pricing import and export actions to the variations table', function (): void {

@@ -20,22 +20,26 @@ class VariationPricingImporter extends Importer
                 ->label('SKU')
                 ->exampleHeader('SKU')
                 ->requiredMapping()
-                ->rules(['required', 'string']),
+                ->rules(['required', 'string'])
+                ->fillRecordUsing(fn (): null => null),
             ImportColumn::make('brand')
                 ->label('Brand')
                 ->exampleHeader('Brand')
                 ->requiredMapping()
-                ->rules(['required', 'string']),
+                ->rules(['required', 'string'])
+                ->fillRecordUsing(fn (): null => null),
             ImportColumn::make('category')
                 ->label('Category')
                 ->exampleHeader('Category')
                 ->requiredMapping()
-                ->rules(['required', 'string']),
+                ->rules(['required', 'string'])
+                ->fillRecordUsing(fn (): null => null),
             ImportColumn::make('description')
                 ->label('Description')
                 ->exampleHeader('Description')
                 ->requiredMapping()
-                ->rules(['required', 'string']),
+                ->rules(['required', 'string'])
+                ->fillRecordUsing(fn (): null => null),
             ImportColumn::make('price')
                 ->label('Price')
                 ->exampleHeader('Price')
@@ -62,6 +66,7 @@ class VariationPricingImporter extends Importer
     public function resolveRecord(): ?Variation
     {
         $storeId = $this->options['store_id'] ?? null;
+
         if (blank($storeId)) {
             throw ValidationException::withMessages([
                 'price' => 'Cannot resolve store for this import job. Please start the import from within a store context.',
@@ -82,18 +87,32 @@ class VariationPricingImporter extends Importer
         $variations = Variation::query()
             ->where('store_id', $storeId)
             ->where('sku', $sku)
-            ->where('description', $description)
-            ->whereHas('product.brand', fn ($query) => $query->where('name', $brand))
-            ->whereHas('product.category', fn ($query) => $query->where('name', $category))
             ->get();
 
-        if ($variations->count() > 1) {
+        if ($variations->isEmpty()) {
             throw ValidationException::withMessages([
-                'sku' => 'Multiple variations found for this SKU. Please use a unique SKU.',
+                'sku' => 'No variation found for this SKU in the current store.',
             ]);
         }
 
-        return $variations->first();
+        $variations = $variations
+            ->filter(fn (Variation $variation): bool => trim((string) $variation->description) === $description)
+            ->filter(fn (Variation $variation): bool => trim((string) $variation->product?->brand?->name) === $brand)
+            ->values();
+
+        if ($variations->count() > 1) {
+            throw ValidationException::withMessages([
+                'sku' => 'Multiple variations matched this SKU, brand, and description. Please make the row more specific.',
+            ]);
+        }
+
+        if ($variations->isEmpty()) {
+            throw ValidationException::withMessages([
+                'sku' => 'No variation matched this pricing row. Please verify SKU, brand, and description.',
+            ]);
+        }
+
+        return $variations->sole();
     }
 
     public function fillRecord(): void
