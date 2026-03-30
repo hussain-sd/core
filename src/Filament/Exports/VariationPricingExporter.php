@@ -8,7 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Number;
 use SmartTill\Core\Models\Variation;
 
-class VariationExporter extends BaseStoreExporter implements ShouldQueue
+class VariationPricingExporter extends BaseStoreExporter implements ShouldQueue
 {
     protected static ?string $model = Variation::class;
 
@@ -30,33 +30,20 @@ class VariationExporter extends BaseStoreExporter implements ShouldQueue
                 ->label('Brand'),
             ExportColumn::make('product.category.name')
                 ->label('Category'),
-            ExportColumn::make('description'),
+            ExportColumn::make('description')
+                ->label('Description'),
             ExportColumn::make('price')
                 ->label('Price'),
             ExportColumn::make('sale_price')
                 ->label('Sale Price'),
             ExportColumn::make('sale_percentage')
                 ->label('Sale %'),
-            ExportColumn::make('unit.symbol')
-                ->label('Unit'),
-            ExportColumn::make('pct_code')
-                ->label('PCT Code'),
-            ExportColumn::make('stock')
-                ->label('Stock'),
-            ExportColumn::make('latestStock.supplier_price')
-                ->label('Supplier Price'),
-            ExportColumn::make('latestStock.tax_amount')
-                ->label('Tax Amount'),
-            ExportColumn::make('latestStock.barcode')
-                ->label('Barcode'),
-            ExportColumn::make('created_at')
-                ->label('Created At'),
         ];
     }
 
     public static function getCompletedNotificationBody(Export $export): string
     {
-        $body = 'Your variations export has completed and '.Number::format($export->successful_rows).' '.str('row')->plural($export->successful_rows).' exported.';
+        $body = 'Your variation pricing export has completed and '.Number::format($export->successful_rows).' '.str('row')->plural($export->successful_rows).' exported.';
 
         if ($failedRowsCount = $export->getFailedRowsCount()) {
             $body .= ' '.Number::format($failedRowsCount).' '.str('row')->plural($failedRowsCount).' failed to export.';
@@ -67,6 +54,6 @@ class VariationExporter extends BaseStoreExporter implements ShouldQueue
 
     protected function getExportTypeName(): string
     {
-        return 'Variations';
+        return 'Variation-Pricing';
     }
 }

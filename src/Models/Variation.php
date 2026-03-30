@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Cache;
 use SmartTill\Core\Casts\PriceCast;
@@ -224,6 +225,11 @@ class Variation extends Model
     public function stocks(): HasMany
     {
         return $this->hasMany(Stock::class);
+    }
+
+    public function latestStock(): HasOne
+    {
+        return $this->hasOne(Stock::class)->latestOfMany();
     }
 
     public function getStockAttribute(): float

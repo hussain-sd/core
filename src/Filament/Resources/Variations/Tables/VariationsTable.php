@@ -12,6 +12,8 @@ use Filament\Facades\Filament;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use SmartTill\Core\Filament\Exports\VariationExporter;
+use SmartTill\Core\Filament\Exports\VariationPricingExporter;
+use SmartTill\Core\Filament\Imports\VariationPricingImporter;
 use SmartTill\Core\Filament\Imports\VariationStockImporter;
 use SmartTill\Core\Filament\Resources\Helpers\ResourceCanAccessHelper;
 use SmartTill\Core\Filament\Resources\Helpers\SyncReferenceColumn;
@@ -104,11 +106,25 @@ class VariationsTable
                     ])
                     ->visible(fn () => ResourceCanAccessHelper::check('Import Variation Stock'))
                     ->authorize(fn () => ResourceCanAccessHelper::check('Import Variation Stock')),
+                ImportAction::make('importVariationPricing')
+                    ->label('Import Pricing')
+                    ->importer(VariationPricingImporter::class)
+                    ->fileRules(['required', 'file', 'mimes:csv', 'max:10240'])
+                    ->options([
+                        'store_id' => Filament::getTenant()?->getKey(),
+                    ])
+                    ->visible(fn () => ResourceCanAccessHelper::check('Edit Variations'))
+                    ->authorize(fn () => ResourceCanAccessHelper::check('Edit Variations')),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     ExportBulkAction::make()
                         ->exporter(VariationExporter::class)
+                        ->visible(fn () => ResourceCanAccessHelper::check('Export Variations'))
+                        ->authorize(fn () => ResourceCanAccessHelper::check('Export Variations')),
+                    ExportBulkAction::make('exportVariationPricing')
+                        ->label('Export Pricing')
+                        ->exporter(VariationPricingExporter::class)
                         ->visible(fn () => ResourceCanAccessHelper::check('Export Variations'))
                         ->authorize(fn () => ResourceCanAccessHelper::check('Export Variations')),
                 ]),
