@@ -56,20 +56,6 @@ class VariationPricingImporter extends Importer
 
                     $record->sale_price = (float) $state;
                 }),
-            ImportColumn::make('sale_percentage')
-                ->label('Sale %')
-                ->exampleHeader('Sale %')
-                ->numeric(decimalPlaces: 6)
-                ->rules(['nullable', 'numeric', 'min:0', 'max:100'])
-                ->fillRecordUsing(function (Variation $record, $state): void {
-                    if ($state === null || $state === '') {
-                        $record->sale_percentage = null;
-
-                        return;
-                    }
-
-                    $record->sale_percentage = round((float) $state, 6);
-                }),
         ];
     }
 

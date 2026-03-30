@@ -36,8 +36,6 @@ class VariationPricingExporter extends BaseStoreExporter implements ShouldQueue
                 ->label('Price'),
             ExportColumn::make('sale_price')
                 ->label('Sale Price'),
-            ExportColumn::make('sale_percentage')
-                ->label('Sale %'),
         ];
     }
 

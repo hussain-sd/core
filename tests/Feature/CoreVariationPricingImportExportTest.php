@@ -11,7 +11,7 @@ it('defines a pricing-only variation exporter with pricing columns', function ()
         ->toContain("ExportColumn::make('description')")
         ->toContain("ExportColumn::make('price')")
         ->toContain("ExportColumn::make('sale_price')")
-        ->toContain("ExportColumn::make('sale_percentage')")
+        ->not->toContain("ExportColumn::make('sale_percentage')")
         ->not->toContain("ExportColumn::make('stock')")
         ->not->toContain('latestStock')
         ->toContain("return 'Variation-Pricing';");
@@ -28,12 +28,20 @@ it('defines a pricing importer that updates variation pricing fields only', func
         ->toContain("ImportColumn::make('description')")
         ->toContain("ImportColumn::make('price')")
         ->toContain("ImportColumn::make('sale_price')")
-        ->toContain("ImportColumn::make('sale_percentage')")
+        ->not->toContain("ImportColumn::make('sale_percentage')")
         ->toContain('parent::fillRecord();')
         ->toContain("\$this->record->price = (float) (\$this->data['price'] ?? 0);")
         ->not->toContain("ImportColumn::make('stock')")
         ->not->toContain("ImportColumn::make('barcode')")
         ->not->toContain('Stock::create(');
+});
+
+it('relies on the variation observer to derive sale percentage from sale price', function (): void {
+    $contents = file_get_contents(dirname(__DIR__, 2).'/src/Filament/Imports/VariationPricingImporter.php');
+
+    expect($contents)
+        ->toContain("\$record->sale_price = (float) \$state;")
+        ->not->toContain("\$record->sale_percentage = round((float) \$state, 6);");
 });
 
 it('adds separate variation pricing import and export actions to the variations table', function (): void {
