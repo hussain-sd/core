@@ -10,6 +10,7 @@ use Filament\Actions\ImportAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use SmartTill\Core\Filament\Exports\VariationExporter;
 use SmartTill\Core\Filament\Exports\VariationPricingExporter;
@@ -31,6 +32,14 @@ class VariationsTable
             ])
             ->columns([
                 SyncReferenceColumn::make(),
+                TextColumn::make('product.brand.name')
+                    ->label('Brand')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('product.category.name')
+                    ->label('Category')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('sku')
                     ->label('SKU')
                     ->searchable(),
@@ -84,7 +93,17 @@ class VariationsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                SelectFilter::make('brand')
+                    ->relationship('product.brand', 'name')
+                    ->searchable()
+                    ->multiple()
+                    ->preload(),
+
+                SelectFilter::make('category')
+                    ->relationship('product.category', 'name')
+                    ->searchable()
+                    ->multiple()
+                    ->preload(),
             ])
             ->recordActions([
                 ActionGroup::make([
