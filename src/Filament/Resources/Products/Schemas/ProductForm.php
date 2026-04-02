@@ -523,6 +523,30 @@ class ProductForm
                             ->maxLength(255)
                             ->afterStateUpdated(function ($state, callable $set, callable $get) use ($buildVariations) {
                                 if ($get('has_variations')) {
+                                    $fresh = collect($buildVariations($get));
+                                    $existing = collect($get('variations') ?? []);
+
+                                    if ($existing->isEmpty()) {
+                                        $set('variations', array_values($fresh->all()));
+                                        $set('variations_generated', true);
+                                        $set('variations_ready', true);
+
+                                        return;
+                                    }
+
+                                    $updated = $existing->map(function ($row) use ($fresh) {
+                                        $key = $row['key'] ?? null;
+                                        if ($key && isset($fresh[$key]['description'])) {
+                                            $row['description'] = $fresh[$key]['description'];
+                                        }
+
+                                        return $row;
+                                    });
+
+                                    $set('variations', $updated->values()->all());
+                                    $set('variations_generated', true);
+                                    $set('variations_ready', true);
+
                                     return;
                                 }
 

@@ -30,10 +30,49 @@ class ProductObserver
             ]);
         }
 
-        if ($product->wasChanged('name') && ! $product->has_variations) {
-            $product->variations()->update([
-                'description' => (string) $product->name,
-            ]);
+        if ($product->wasChanged('name')) {
+            $originalName = trim((string) $product->getOriginal('name'));
+            $currentName = trim((string) $product->name);
+
+            $product->variations()
+                ->get()
+                ->each(function ($variation) use ($originalName, $currentName, $product): void {
+                    $description = trim((string) $variation->description);
+
+                    if (! $product->has_variations) {
+                        if ($description === $currentName) {
+                            return;
+                        }
+
+                        $variation->update([
+                            'description' => $currentName,
+                        ]);
+
+                        return;
+                    }
+
+                    if ($originalName === '') {
+                        return;
+                    }
+
+                    if ($description === $originalName) {
+                        $variation->update([
+                            'description' => $currentName,
+                        ]);
+
+                        return;
+                    }
+
+                    $prefix = $originalName.' - ';
+
+                    if (! str_starts_with($description, $prefix)) {
+                        return;
+                    }
+
+                    $variation->update([
+                        'description' => $currentName.substr($description, strlen($originalName)),
+                    ]);
+                });
         }
 
         $this->invalidateProductSearchCache($product->store_id);
