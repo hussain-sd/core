@@ -521,7 +521,7 @@ class ProductForm
                             ->placeholder('Enter product name')
                             ->helperText('Clear, descriptive product title')
                             ->maxLength(255)
-                            ->afterStateUpdated(function ($state, callable $set, callable $get) use ($buildVariations) {
+                            ->afterStateUpdated(function ($state, callable $set, callable $get) use ($buildVariations, $makeSignatureFromAttrPartFactory) {
                                 if ($get('has_variations')) {
                                     $fresh = collect($buildVariations($get));
                                     $existing = collect($get('variations') ?? []);
@@ -532,6 +532,27 @@ class ProductForm
                                         $set('variations_ready', true);
 
                                         return;
+                                    }
+
+                                    if ($existing->contains(fn ($row) => empty($row['key']))) {
+                                        $makeSignatureFromAttrPart = $makeSignatureFromAttrPartFactory($get);
+
+                                        $existing = $existing->map(function ($row) use ($makeSignatureFromAttrPart, $fresh) {
+                                            if (! empty($row['key'])) {
+                                                return $row;
+                                            }
+
+                                            $description = (string) ($row['description'] ?? '');
+                                            $position = strrpos($description, ' - ');
+                                            $attributePart = $position === false ? $description : substr($description, $position + 3);
+                                            $signature = $makeSignatureFromAttrPart($attributePart);
+
+                                            if ($signature && isset($fresh[$signature])) {
+                                                $row['key'] = $signature;
+                                            }
+
+                                            return $row;
+                                        });
                                     }
 
                                     $updated = $existing->map(function ($row) use ($fresh) {
