@@ -8,6 +8,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Model;
 use SmartTill\Core\Enums\BrandStatus;
 
 class BrandForm
@@ -28,6 +29,7 @@ class BrandForm
                             ->columnSpan(2),
 
                         Section::make('Status')
+                            ->hidden(fn (?Model $record): bool => $record === null)
                             ->schema([
                                 Select::make('status')
                                     ->options(BrandStatus::class)
