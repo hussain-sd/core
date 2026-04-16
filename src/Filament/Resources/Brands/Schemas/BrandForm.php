@@ -26,7 +26,7 @@ class BrandForm
                                 Textarea::make('description')
                                     ->columnSpanFull(),
                             ])
-                            ->columnSpan(2),
+                            ->columnSpan(fn (?Model $record): int|string => $record === null ? 'full' : 2),
 
                         Section::make('Status')
                             ->hidden(fn (?Model $record): bool => $record === null)
