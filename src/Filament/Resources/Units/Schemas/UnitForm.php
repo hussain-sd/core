@@ -14,6 +14,7 @@ class UnitForm
         return $schema
             ->components([
                 Section::make('Unit Details')
+                    ->columnSpanFull()
                     ->columns(2)
                     ->schema([
                         TextInput::make('name')
@@ -31,6 +32,7 @@ class UnitForm
                             ->preload(),
                     ]),
                 Section::make('Conversion')
+                    ->columnSpanFull()
                     ->columns(2)
                     ->schema([
                         TextInput::make('to_base_factor')

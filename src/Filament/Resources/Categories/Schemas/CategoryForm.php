@@ -8,6 +8,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Model;
 use SmartTill\Core\Enums\CategoryStatus;
 
 class CategoryForm
@@ -25,9 +26,10 @@ class CategoryForm
                                 Textarea::make('description')
                                     ->columnSpanFull(),
                             ])
-                            ->columnSpan(2),
+                            ->columnSpan(fn (?Model $record): int|string => $record === null ? 'full' : 2),
 
                         Section::make('Status')
+                            ->hidden(fn (?Model $record): bool => $record === null)
                             ->schema([
                                 Select::make('status')
                                     ->options(CategoryStatus::class)
