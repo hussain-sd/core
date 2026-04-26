@@ -20,6 +20,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
@@ -72,7 +73,14 @@ class TransactionsRelationManager extends RelationManager
                         return null;
                     }),
                 TextColumn::make('note')
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->where(function (Builder $q) use ($search): void {
+                            $q->where('note', 'like', "%{$search}%")
+                                ->orWhere('header_note', 'like', "%{$search}%")
+                                ->orWhere('footer_note', 'like', "%{$search}%");
+                        });
+                    }),
                 TextColumn::make('created_at')
                     ->label('Created at')
                     ->dateTime('M d, Y g:i A')
@@ -237,7 +245,15 @@ class TransactionsRelationManager extends RelationManager
         $customer = $this->getOwnerRecord();
 
         $transactionsBaseQuery = Transaction::query()
-            ->select($this->qualifyTransactionColumns($columns))
+            ->select([
+                ...$this->qualifyTransactionColumns($columns),
+                DB::raw("COALESCE(sales.header_note, '') as header_note"),
+                DB::raw("COALESCE(sales.footer_note, '') as footer_note"),
+            ])
+            ->leftJoin('sales', function ($join): void {
+                $join->on('sales.id', '=', 'transactions.referenceable_id')
+                    ->whereIn('transactions.referenceable_type', [Sale::class, 'App\\Models\\Sale']);
+            })
             ->where('transactions.transactionable_id', $customer->getKey())
             ->whereNotNull('transactions.transactionable_id')
             ->whereIn('transactions.transactionable_type', Customer::transactionMorphTypes())
@@ -249,7 +265,11 @@ class TransactionsRelationManager extends RelationManager
 
         return Transaction::query()
             ->fromSub($transactionsBaseQuery, 'transactions')
-            ->select($this->qualifyTransactionColumns($columns));
+            ->select([
+                ...$this->qualifyTransactionColumns($columns),
+                'transactions.header_note',
+                'transactions.footer_note',
+            ]);
     }
 
     public function downloadLedgerReport(string $format, bool $includePaidSales = false): StreamedResponse
@@ -411,6 +431,10 @@ class TransactionsRelationManager extends RelationManager
                 default => $query->selectRaw("null as {$column}"),
             };
         }
+
+        // Extra columns to support searching by sale header/footer note
+        $query->selectRaw("COALESCE(sales.header_note, '') as header_note");
+        $query->selectRaw("COALESCE(sales.footer_note, '') as footer_note");
 
         return $query;
     }
