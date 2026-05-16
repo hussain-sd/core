@@ -10,7 +10,8 @@
     "laravel/sanctum": "^4.0",
     "league/iso3166": "^4.3",
     "livewire/livewire": "^4.0",
-    "pragmarx/countries": "^1.0"
+    "pragmarx/countries": "^1.0",
+    "simplesoftwareio/simple-qrcode": "^4.2"
   },
   "autoload": {
     "psr-4": {

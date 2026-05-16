@@ -7,6 +7,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
@@ -18,6 +19,7 @@ use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use SmartTill\Core\Enums\FbrEnvironment;
 use SmartTill\Core\Enums\SalePaymentMethod;
 use SmartTill\Core\Enums\SalePaymentStatus;
 use SmartTill\Core\Enums\SaleStatus;
@@ -224,52 +226,23 @@ class SaleForm
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
                                             ->afterStateUpdated(function ($state, $set, $get) {
-                                                // Round to 6 decimal places, allow negative quantities
                                                 $quantity = round((float) ($state ?: 1), 6);
-                                                // Ensure quantity is not zero
                                                 if ($quantity == 0) {
                                                     $quantity = $quantity > 0 ? 1 : -1;
                                                 }
                                                 $set('quantity', $quantity);
-
-                                                // If discount type is percentage, recalculate the discount amount
                                                 if ($get('discount_type') === 'percentage') {
                                                     $unitPrice = (float) ($get('unit_price') ?: 0);
                                                     $percentage = (float) ($get('discount_percentage') ?? 0);
-                                                    $subtotalBeforeDiscount = $unitPrice * abs($quantity);
-
-                                                    // Recalculate discount amount from percentage
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotalBeforeDiscount * abs($percentage)) / 100;
-                                                    // Apply negative sign if percentage is negative or quantity is negative
-                                                    if ($percentage < 0 || $quantity < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Always preserve percentage format in display
-                                                    $set('discount', self::formatPercentage($percentage));
-
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($quantity != 0) {
-                                                        $unitDiscount = $discountAmount / $quantity;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-                                                    $set('discount_amount', $discountAmount);
+                                                    self::recalcPercentDiscount($quantity, $unitPrice * abs($quantity), $percentage, $set, 'discount');
                                                 } else {
-                                                    // For flat discount, automatically adjust sign based on quantity
                                                     $currentDiscount = (float) ($get('discount') ?? 0);
                                                     if ($quantity < 0 && $currentDiscount > 0) {
-                                                        // If quantity becomes negative and discount is positive, make discount negative
                                                         $set('discount', self::formatNumberForState($currentDiscount * -1));
                                                     } elseif ($quantity >= 0 && $currentDiscount < 0) {
-                                                        // If quantity becomes positive and discount is negative, make discount positive
                                                         $set('discount', self::formatNumberForState(abs($currentDiscount)));
                                                     }
                                                 }
-
                                                 SaleForm::recalcLine($get, $set);
                                             }),
                                         TextInput::make('unit_price')
@@ -285,76 +258,21 @@ class SaleForm
                                                 'data-sale-item-input' => 'true',
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
-                                            ->extraAttributes([
-                                                'class' => 'price-field-wrapper',
-                                                'x-data' => '{}',
-                                                'x-init' => "\$nextTick(() => {
-                                                    const styleId = 'price-helper-style';
-                                                    if (!document.getElementById(styleId)) {
-                                                        const style = document.createElement('style');
-                                                        style.id = styleId;
-                                                        style.textContent = '.price-field-wrapper .fi-sc-text, .fi-input-wrapper:has(input[data-price-input]) .fi-sc-text { font-size: 0.3rem !important; line-height: 0.35rem !important; opacity: 0.5 !important; margin-top: 0.0625rem !important; color: rgb(107 114 128) !important; }';
-                                                        document.head.appendChild(style);
-                                                    }
-                                                })",
-                                            ])
-                                            ->helperText(function ($get) {
-                                                $unitPrice = (float) ($get('unit_price') ?? 0);
-                                                $unitDiscount = (float) ($get('unit_discount') ?? 0);
-
-                                                // Only show helper text if there's a discount applied
-                                                if ($unitDiscount != 0 && $unitPrice > 0) {
-                                                    // Calculate price after discount
-                                                    $priceAfterDiscount = $unitPrice - abs($unitDiscount);
-
-                                                    if ($priceAfterDiscount > 0) {
-                                                        // Get smallest integer (floor)
-                                                        $priceAfterDiscountInteger = (int) floor($priceAfterDiscount);
-
-                                                        if ($priceAfterDiscountInteger > 0) {
-                                                            return "1x={$priceAfterDiscountInteger}";
-                                                        }
-                                                    }
-                                                }
-
-                                                return null;
-                                            })
+                                            ->extraAttributes(self::priceExtraAttributes())
+                                            ->helperText(fn ($get) => self::priceHelperText(
+                                                (float) ($get('unit_price') ?? 0),
+                                                (float) ($get('unit_discount') ?? 0),
+                                            ))
                                             ->afterStateUpdated(function ($state, $set, $get) {
                                                 $unitPrice = round((float) $state, 2);
                                                 if ((float) $state !== $unitPrice) {
                                                     $set('unit_price', $unitPrice);
                                                 }
-
-                                                // If there's a percentage discount, recalculate discount_amount based on new unit_price
-                                                $discountType = $get('discount_type');
-                                                if ($discountType === 'percentage') {
+                                                if ($get('discount_type') === 'percentage') {
                                                     $quantity = (float) ($get('quantity') ?: 1);
-                                                    $subtotalBeforeDiscount = $unitPrice * abs($quantity);
                                                     $discountPercentage = (float) ($get('discount_percentage') ?? 0);
-
-                                                    // Recalculate discount amount from percentage
-                                                    // Recalculate discount amount from percentage
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotalBeforeDiscount * abs($discountPercentage)) / 100;
-                                                    // Apply negative sign if percentage is negative or quantity is negative
-                                                    if ($discountPercentage < 0 || $quantity < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Update discount_amount and unit_discount
-                                                    $set('discount_amount', $discountAmount);
-                                                    if ($quantity != 0) {
-                                                        $unitDiscount = $discountAmount / $quantity;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-
-                                                    // Always preserve percentage format in display
-                                                    $set('discount', self::formatPercentage($discountPercentage));
+                                                    self::recalcPercentDiscount($quantity, $unitPrice * abs($quantity), $discountPercentage, $set, 'discount');
                                                 }
-
                                                 SaleForm::recalcLine($get, $set);
                                             }),
                                         TextInput::make('discount')
@@ -376,130 +294,14 @@ class SaleForm
                                                 'data-sale-item-input' => 'true',
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
-                                            ->helperText(function ($get) {
-                                                $quantity = (float) ($get('quantity') ?? 1);
-                                                $discount = $get('discount');
-
-                                                // Don't show helper text for percentage discounts
-                                                if (is_string($discount) && str_contains($discount, '%')) {
-                                                    return null;
-                                                }
-
-                                                // Only show hint if quantity > 1 and there's a flat discount
-                                                if (abs($quantity) > 1 && $discount !== null && $discount !== '') {
-                                                    // Flat discount - use the discount value directly
-                                                    $discountAmount = (float) $discount;
-
-                                                    if ($discountAmount != 0) {
-                                                        // Calculate per-unit discount
-                                                        $unitDiscount = abs($discountAmount) / abs($quantity);
-                                                        // Get smallest integer (floor)
-                                                        $unitDiscountInteger = (int) floor($unitDiscount);
-
-                                                        if ($unitDiscountInteger > 0) {
-                                                            return "1x={$unitDiscountInteger}";
-                                                        }
-                                                    }
-                                                }
-
-                                                return null;
-                                            })
+                                            ->helperText(fn ($get) => self::discHelperText(
+                                                (float) ($get('quantity') ?? 1),
+                                                $get('discount'),
+                                            ))
                                             ->afterStateUpdated(function ($state, $set, $get) {
                                                 $quantity = (float) ($get('quantity') ?: 1);
                                                 $unitPrice = (float) ($get('unit_price') ?: 0);
-                                                $subtotalBeforeDiscount = $unitPrice * abs($quantity);
-
-                                                // Check if state contains percentage symbol
-                                                if (is_string($state) && str_contains($state, '%')) {
-                                                    // Extract the percentage value
-                                                    $rawPercentage = str_replace('%', '', trim($state));
-
-                                                    // Validate format - must be numeric and within reasonable range
-                                                    if (! is_numeric($rawPercentage)) {
-                                                        $set('discount', '');
-                                                        $set('discount_type', null);
-                                                        $set('discount_percentage', null);
-
-                                                        return;
-                                                    }
-
-                                                    $percentage = (float) $rawPercentage;
-
-                                                    // Validate percentage range based on quantity
-                                                    // For returns (negative quantity), allow -999.999999 to 999.999999
-                                                    // For normal sales (positive quantity), allow 0 to 999.999999
-                                                    if ($quantity < 0) {
-                                                        // Return case: allow negative percentages (-999.999999 to 999.999999)
-                                                        if ($percentage < -999.999999) {
-                                                            $percentage = -999.999999;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    } else {
-                                                        // Normal sale: allow 0 to 999.999999
-                                                        if ($percentage < 0) {
-                                                            $percentage = 0;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    }
-
-                                                    $percentage = round($percentage, 6); // Round to 6 decimals
-
-                                                    // Calculate discount amount from percentage
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotalBeforeDiscount * abs($percentage)) / 100;
-                                                    // Apply negative sign if percentage is negative or quantity is negative
-                                                    if ($percentage < 0 || $quantity < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Store that this is a percentage discount
-                                                    $set('discount_type', 'percentage');
-                                                    $set('discount_percentage', $percentage);
-
-                                                    // Update the display value - show percentage format
-                                                    $set('discount', self::formatPercentage($percentage));
-
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($quantity != 0) {
-                                                        $unitDiscount = $discountAmount / $quantity;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-                                                    // Store the calculated amount in a hidden field for calculations
-                                                    $set('discount_amount', $discountAmount);
-                                                } else {
-                                                    // Treat as flat discount amount and round to 2 decimal places
-                                                    // Automatically set discount to negative when quantity is negative (return case)
-                                                    $discountAmount = (float) $state;
-                                                    if ($quantity < 0) {
-                                                        // For negative quantity, automatically make discount negative
-                                                        $discountAmount = abs($discountAmount) * -1;
-                                                    } else {
-                                                        // For positive quantity, ensure discount is non-negative
-                                                        $discountAmount = max(0, $discountAmount);
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-                                                    $set('discount', self::formatNumberForState($discountAmount));
-
-                                                    // Store that this is a flat discount
-                                                    $set('discount_type', 'flat');
-                                                    $set('discount_percentage', null);
-
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($quantity != 0) {
-                                                        $unitDiscount = $discountAmount / $quantity;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-                                                    $set('discount_amount', $discountAmount);
-                                                }
-
-                                                // Recalculate line total
+                                                self::applyDiscountInput($state, $quantity, $unitPrice * abs($quantity), $set, 'discount');
                                                 SaleForm::recalcLine($get, $set);
                                             }),
                                         TextInput::make('total')
@@ -580,85 +382,38 @@ class SaleForm
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
                                             ->afterStateUpdated(function ($state, $set, $get) {
-                                                // Round to 6 decimal places, allow negative quantities
                                                 $qty = round((float) ($state ?: 1), 6);
-                                                // Ensure quantity is not zero
                                                 if ($qty == 0) {
                                                     $qty = $qty > 0 ? 1 : -1;
                                                 }
                                                 $set('qty', $qty);
-
-                                                // If discount type is percentage, recalculate the discount amount
                                                 if ($get('discount_type') === 'percentage') {
                                                     $price = (float) ($get('price') ?: 0);
                                                     $percentage = (float) ($get('discount_percentage') ?? 0);
-
-                                                    // Get preparable_items to calculate items total
-                                                    $preparableVariations = $get('../../preparable_variations') ?? [];
-                                                    $currentVariationId = $get('variation_id');
-                                                    $currentDescription = $get('description');
-                                                    $itemsTotal = 0;
-
-                                                    foreach ($preparableVariations as $variation) {
-                                                        if (($variation['variation_id'] ?? null) == $currentVariationId ||
-                                                            ($variation['description'] ?? null) == $currentDescription) {
-                                                            $preparableItems = $variation['preparable_items'] ?? [];
-                                                            if (is_array($preparableItems)) {
-                                                                foreach ($preparableItems as $item) {
-                                                                    $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                    $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-                                                                    $itemDisc = isset($item['disc']) ? (float) $item['disc'] : 0;
-                                                                    $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                                }
-                                                            }
-                                                            break;
-                                                        }
-                                                    }
-
-                                                    $subtotalBeforeDiscount = ($price + $itemsTotal) * abs($qty);
-
-                                                    // Recalculate discount amount from percentage and round to 2 decimals
-                                                    $discountAmount = ($subtotalBeforeDiscount * $percentage) / 100;
-                                                    // Automatically set discount to negative when quantity is negative (return case)
+                                                    $itemsTotal = self::getPrepVarItemsTotal($get);
+                                                    // Uses $percentage directly (not abs) to preserve sign for double-negative edge case
+                                                    $discountAmount = round((($price + $itemsTotal) * abs($qty) * $percentage) / 100, 2);
                                                     if ($qty < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-                                                    // Update display to show negative discount amount when quantity is negative, otherwise show percentage
-                                                    if ($qty < 0) {
+                                                        $discountAmount *= -1;
                                                         $set('disc', self::formatNumberForState($discountAmount));
                                                     } else {
-                                                        // Keep percentage format when quantity is positive
                                                         $set('disc', self::formatPercentage($percentage));
                                                     }
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($qty != 0) {
-                                                        $unitDiscount = $discountAmount / $qty;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
+                                                    $set('unit_discount', $qty != 0 ? round($discountAmount / $qty, 2) : 0);
                                                     $set('discount_amount', $discountAmount);
                                                 } else {
-                                                    // Recalculate discount based on unit_discount
                                                     $unitDiscount = (float) ($get('unit_discount') ?? 0);
                                                     if ($unitDiscount != 0) {
-                                                        // Use quantity (not abs) to preserve sign when quantity is negative
-                                                        $discount = round($unitDiscount * $qty, 2);
-                                                        $set('disc', self::formatNumberForState($discount));
+                                                        $set('disc', self::formatNumberForState(round($unitDiscount * $qty, 2)));
                                                     } else {
-                                                        // If no unit_discount, adjust sign based on quantity
                                                         $currentDiscount = (float) ($get('disc') ?? 0);
                                                         if ($qty < 0 && $currentDiscount > 0) {
-                                                            // If quantity becomes negative and discount is positive, make discount negative
                                                             $set('disc', self::formatNumberForState($currentDiscount * -1));
                                                         } elseif ($qty >= 0 && $currentDiscount < 0) {
-                                                            // If quantity becomes positive and discount is negative, make discount positive
                                                             $set('disc', self::formatNumberForState(abs($currentDiscount)));
                                                         }
                                                     }
                                                 }
-
                                                 SaleForm::recalcPreparableVariationLine($get, $set);
                                             }),
                                         TextInput::make('price')
@@ -671,133 +426,31 @@ class SaleForm
                                                 'data-price-input' => 'true',
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
-                                            ->extraAttributes([
-                                                'class' => 'price-field-wrapper',
-                                                'x-data' => '{}',
-                                                'x-init' => "\$nextTick(() => {
-                                                    const styleId = 'price-helper-style';
-                                                    if (!document.getElementById(styleId)) {
-                                                        const style = document.createElement('style');
-                                                        style.id = styleId;
-                                                        style.textContent = '.price-field-wrapper .fi-sc-text, .fi-input-wrapper:has(input[data-price-input]) .fi-sc-text { font-size: 0.3rem !important; line-height: 0.35rem !important; opacity: 0.5 !important; margin-top: 0.0625rem !important; color: rgb(107 114 128) !important; }';
-                                                        document.head.appendChild(style);
-                                                    }
-                                                })",
-                                            ])
+                                            ->extraAttributes(self::priceExtraAttributes())
                                             ->helperText(function ($get) {
                                                 $price = (float) ($get('price') ?? 0);
-                                                $qty = (float) ($get('qty') ?? 1);
-
-                                                // Get preparable_items to calculate items total (needed for accurate price calculation)
-                                                $preparableVariations = $get('../../preparable_variations') ?? [];
-                                                $currentVariationId = $get('variation_id');
-                                                $currentDescription = $get('description');
-                                                $itemsTotal = 0;
-
-                                                foreach ($preparableVariations as $variation) {
-                                                    if (($variation['variation_id'] ?? null) == $currentVariationId ||
-                                                        ($variation['description'] ?? null) == $currentDescription) {
-                                                        $preparableItems = $variation['preparable_items'] ?? [];
-                                                        if (is_array($preparableItems)) {
-                                                            foreach ($preparableItems as $item) {
-                                                                $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-                                                                $itemDisc = isset($item['disc']) ? (float) $item['disc'] : 0;
-                                                                $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                            }
-                                                        }
-                                                        break;
-                                                    }
-                                                }
-
-                                                // Get discount amount - use discount_amount for percentage discounts, otherwise use disc field
+                                                $qty = abs((float) ($get('qty') ?? 1));
+                                                $itemsTotal = self::getPrepVarItemsTotal($get);
                                                 $discountType = $get('discount_type');
-                                                if ($discountType === 'percentage') {
-                                                    // For percentage discounts, use the calculated discount_amount
-                                                    $discountAmount = (float) ($get('discount_amount') ?? 0);
-                                                } else {
-                                                    // For flat discounts, use the disc field directly
-                                                    $disc = $get('disc');
-                                                    $discountAmount = is_string($disc) && str_contains($disc, '%') ? 0 : (float) $disc;
-                                                }
+                                                $disc = $discountType === 'percentage'
+                                                    ? (float) ($get('discount_amount') ?? 0)
+                                                    : (float) ($get('disc') ?? 0);
+                                                $unitDiscount = $qty > 0 ? abs($disc) / $qty : 0;
+                                                $effectiveUnitPrice = $price + ($qty > 0 ? $itemsTotal / $qty : 0);
 
-                                                // Only show helper text if there's a discount applied and qty > 0
-                                                if ($discountAmount != 0 && ($price + $itemsTotal) > 0 && abs($qty) > 0) {
-                                                    // Calculate per-unit discount (discount is applied to (price + itemsTotal) * qty)
-                                                    $unitDiscount = abs($discountAmount) / abs($qty);
-                                                    // Calculate price after discount per unit (price + itemsTotal - unitDiscount)
-                                                    $priceAfterDiscount = ($price + ($itemsTotal / abs($qty))) - $unitDiscount;
-
-                                                    if ($priceAfterDiscount > 0) {
-                                                        // Get smallest integer (floor)
-                                                        $priceAfterDiscountInteger = (int) floor($priceAfterDiscount);
-
-                                                        if ($priceAfterDiscountInteger > 0) {
-                                                            return "1x={$priceAfterDiscountInteger}";
-                                                        }
-                                                    }
-                                                }
-
-                                                return null;
+                                                return self::priceHelperText($effectiveUnitPrice, $unitDiscount);
                                             })
                                             ->afterStateUpdated(function ($state, $set, $get) {
                                                 $price = round((float) $state, 2);
                                                 if ((float) $state !== $price) {
                                                     $set('price', $price);
                                                 }
-
-                                                // If there's a percentage discount, recalculate discount_amount based on new price
-                                                $discountType = $get('discount_type');
-                                                if ($discountType === 'percentage') {
+                                                if ($get('discount_type') === 'percentage') {
                                                     $qty = (float) ($get('qty') ?: 1);
-
-                                                    // Get preparable_items to calculate items total
-                                                    $preparableVariations = $get('../../preparable_variations') ?? [];
-                                                    $currentVariationId = $get('variation_id');
-                                                    $currentDescription = $get('description');
-                                                    $itemsTotal = 0;
-
-                                                    foreach ($preparableVariations as $variation) {
-                                                        if (($variation['variation_id'] ?? null) == $currentVariationId ||
-                                                            ($variation['description'] ?? null) == $currentDescription) {
-                                                            $preparableItems = $variation['preparable_items'] ?? [];
-                                                            if (is_array($preparableItems)) {
-                                                                foreach ($preparableItems as $item) {
-                                                                    $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                    $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-                                                                    $itemDisc = isset($item['disc']) ? (float) $item['disc'] : 0;
-                                                                    $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                                }
-                                                            }
-                                                            break;
-                                                        }
-                                                    }
-
-                                                    $subtotalBeforeDiscount = ($price + $itemsTotal) * abs($qty);
+                                                    $itemsTotal = self::getPrepVarItemsTotal($get);
                                                     $discountPercentage = (float) ($get('discount_percentage') ?? 0);
-
-                                                    // Recalculate discount amount from percentage
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotalBeforeDiscount * abs($discountPercentage)) / 100;
-                                                    // Apply negative sign if percentage is negative or quantity is negative
-                                                    if ($discountPercentage < 0 || $qty < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Update discount_amount and unit_discount
-                                                    $set('discount_amount', $discountAmount);
-                                                    if ($qty != 0) {
-                                                        $unitDiscount = $discountAmount / $qty;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-
-                                                    // Always preserve percentage format in display
-                                                    $set('disc', self::formatPercentage($discountPercentage));
+                                                    self::recalcPercentDiscount($qty, ($price + $itemsTotal) * abs($qty), $discountPercentage, $set, 'disc');
                                                 }
-
                                                 SaleForm::recalcPreparableVariationLine($get, $set);
                                             }),
                                         TextInput::make('disc')
@@ -819,155 +472,15 @@ class SaleForm
                                                 'class' => 'text-xs py-0.5 px-1.5 h-7',
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
-                                            ->helperText(function ($get) {
-                                                $qty = (float) ($get('qty') ?? 1);
-                                                $disc = $get('disc');
-
-                                                // Don't show helper text for percentage discounts
-                                                if (is_string($disc) && str_contains($disc, '%')) {
-                                                    return null;
-                                                }
-
-                                                // Only show hint if quantity > 1 and there's a discount
-                                                if (abs($qty) > 1 && $disc !== null && $disc !== '') {
-                                                    // Flat discount - use the discount value directly
-                                                    $discountAmount = (float) $disc;
-
-                                                    if ($discountAmount != 0) {
-                                                        // Calculate per-unit discount
-                                                        $unitDiscount = abs($discountAmount) / abs($qty);
-                                                        // Get smallest integer (floor)
-                                                        $unitDiscountInteger = (int) floor($unitDiscount);
-
-                                                        if ($unitDiscountInteger > 0) {
-                                                            return "1x={$unitDiscountInteger}";
-                                                        }
-                                                    }
-                                                }
-
-                                                return null;
-                                            })
+                                            ->helperText(fn ($get) => self::discHelperText(
+                                                (float) ($get('qty') ?? 1),
+                                                $get('disc'),
+                                            ))
                                             ->afterStateUpdated(function ($state, $set, $get) {
                                                 $qty = (float) ($get('qty') ?: 1);
                                                 $price = (float) ($get('price') ?: 0);
-
-                                                // Get preparable_items to calculate items total
-                                                $preparableVariations = $get('../../preparable_variations') ?? [];
-                                                $currentVariationId = $get('variation_id');
-                                                $currentDescription = $get('description');
-                                                $itemsTotal = 0;
-
-                                                foreach ($preparableVariations as $variation) {
-                                                    if (($variation['variation_id'] ?? null) == $currentVariationId ||
-                                                        ($variation['description'] ?? null) == $currentDescription) {
-                                                        $preparableItems = $variation['preparable_items'] ?? [];
-                                                        if (is_array($preparableItems)) {
-                                                            foreach ($preparableItems as $item) {
-                                                                $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-                                                                $itemDisc = isset($item['disc']) ? (float) $item['disc'] : 0;
-                                                                $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                            }
-                                                        }
-                                                        break;
-                                                    }
-                                                }
-
-                                                $subtotalBeforeDiscount = ($price + $itemsTotal) * abs($qty);
-
-                                                // Check if state contains percentage symbol
-                                                // Convert state to string first to handle any numeric conversion
-                                                $stateString = is_string($state) ? $state : (string) $state;
-                                                if (str_contains($stateString, '%')) {
-                                                    // Extract the percentage value
-                                                    $rawPercentage = str_replace('%', '', trim($stateString));
-
-                                                    // Validate format - must be numeric
-                                                    if (! is_numeric($rawPercentage)) {
-                                                        $set('disc', '');
-                                                        $set('discount_type', null);
-                                                        $set('discount_percentage', null);
-
-                                                        return;
-                                                    }
-
-                                                    $percentage = (float) $rawPercentage;
-
-                                                    // Validate percentage range based on quantity
-                                                    // For returns (negative quantity), allow -999.999999 to 999.999999
-                                                    // For normal sales (positive quantity), allow 0 to 999.999999
-                                                    if ($qty < 0) {
-                                                        // Return case: allow negative percentages (-999.999999 to 999.999999)
-                                                        if ($percentage < -999.999999) {
-                                                            $percentage = -999.999999;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    } else {
-                                                        // Normal sale: allow 0 to 999.999999
-                                                        if ($percentage < 0) {
-                                                            $percentage = 0;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    }
-
-                                                    $percentage = round($percentage, 6); // Round to 6 decimals
-
-                                                    // Calculate discount amount from percentage
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotalBeforeDiscount * abs($percentage)) / 100;
-                                                    // Apply negative sign if percentage is negative or quantity is negative
-                                                    if ($percentage < 0 || $qty < 0) {
-                                                        $discountAmount = $discountAmount * -1;
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Store that this is a percentage discount
-                                                    $set('discount_type', 'percentage');
-                                                    $set('discount_percentage', $percentage);
-
-                                                    // Update the display value - show percentage format
-                                                    $set('disc', self::formatPercentage($percentage));
-
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($qty != 0) {
-                                                        $unitDiscount = $discountAmount / $qty;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-                                                    // Store the calculated amount in a hidden field for calculations
-                                                    $set('discount_amount', $discountAmount);
-                                                } else {
-                                                    // Treat as flat discount amount and round to 2 decimal places
-                                                    // Automatically set discount to negative when quantity is negative (return case)
-                                                    $discountAmount = (float) $state;
-                                                    if ($qty < 0) {
-                                                        // For negative quantity, automatically make discount negative
-                                                        $discountAmount = abs($discountAmount) * -1;
-                                                    } else {
-                                                        // For positive quantity, ensure discount is non-negative
-                                                        $discountAmount = max(0, $discountAmount);
-                                                    }
-                                                    $discountAmount = round($discountAmount, 2);
-                                                    $set('disc', self::formatNumberForState($discountAmount));
-
-                                                    // Store that this is a flat discount
-                                                    $set('discount_type', 'flat');
-                                                    $set('discount_percentage', null);
-
-                                                    // Update unit_discount - preserve sign when quantity is negative
-                                                    if ($qty != 0) {
-                                                        $unitDiscount = $discountAmount / $qty;
-                                                    } else {
-                                                        $unitDiscount = 0;
-                                                    }
-                                                    $set('unit_discount', round($unitDiscount, 2));
-                                                    $set('discount_amount', $discountAmount);
-                                                }
-
-                                                // Recalculate summary
+                                                $itemsTotal = self::getPrepVarItemsTotal($get);
+                                                self::applyDiscountInput($state, $qty, ($price + $itemsTotal) * abs($qty), $set, 'disc');
                                                 SaleForm::recalcPreparableVariationLine($get, $set);
                                             }),
                                         TextInput::make('total')
@@ -980,55 +493,18 @@ class SaleForm
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ])
                                             ->afterStateUpdated(function ($state, $set, $get) {
-                                                // When total is changed, calculate new discount
                                                 $qty = (float) ($get('qty') ?: 1);
                                                 $rawTotal = round((float) $state, 2);
                                                 $newTotal = $qty >= 0 ? round(max(0, $rawTotal), 2) : $rawTotal;
                                                 $set('total', $newTotal);
-
                                                 $price = (float) ($get('price') ?: 0);
-
-                                                // Get preparable_items to calculate items total
-                                                $preparableVariations = $get('../../preparable_variations') ?? [];
-                                                $currentVariationId = $get('variation_id');
-                                                $currentDescription = $get('description');
-                                                $itemsTotal = 0;
-
-                                                foreach ($preparableVariations as $variation) {
-                                                    if (($variation['variation_id'] ?? null) == $currentVariationId ||
-                                                        ($variation['description'] ?? null) == $currentDescription) {
-                                                        $preparableItems = $variation['preparable_items'] ?? [];
-                                                        if (is_array($preparableItems)) {
-                                                            foreach ($preparableItems as $item) {
-                                                                $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-                                                                $itemDisc = isset($item['disc']) ? (float) $item['disc'] : 0;
-                                                                $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                            }
-                                                        }
-                                                        break;
-                                                    }
-                                                }
-
-                                                // Calculate what the discount should be: ((price + items_total) * qty) - newTotal
-                                                $calculatedDisc = (($price + $itemsTotal) * $qty) - $newTotal;
-                                                // Allow negative discount when quantity is negative
+                                                $itemsTotal = self::getPrepVarItemsTotal($get);
+                                                $calculatedDisc = round((($price + $itemsTotal) * $qty) - $newTotal, 2);
                                                 if ($qty >= 0) {
                                                     $calculatedDisc = max(0, $calculatedDisc);
                                                 }
-                                                $calculatedDisc = round($calculatedDisc, 2);
-
                                                 $set('disc', self::formatNumberForState($calculatedDisc));
-
-                                                // Update unit_discount based on quantity
-                                                if ($qty != 0) {
-                                                    $unitDiscount = $calculatedDisc / $qty;
-                                                } else {
-                                                    $unitDiscount = 0;
-                                                }
-                                                $set('unit_discount', round($unitDiscount, 2));
-
-                                                // Recalculate summary
+                                                $set('unit_discount', round($qty != 0 ? $calculatedDisc / $qty : 0, 2));
                                                 SaleForm::recalcPreparableVariationLine($get, $set);
                                             }),
                                         ProductSearchInput::make('preparable_product_search')
@@ -1038,458 +514,14 @@ class SaleForm
                                             ->excludePreparable()
                                             ->live()
                                             ->columnSpanFull()
-                                            ->afterStateUpdated(function ($state, $set, $get) {
-                                                // This will be triggered when a product is selected via Livewire event
-                                                // The state will contain the barcode ID (when mode is 'barcodes')
-                                                if (! $state) {
-                                                    return;
-                                                }
-
-                                                $barcode = Stock::query()
-                                                    ->with(['variation.product'])
-                                                    ->find($state);
-                                                if (! $barcode || ! $barcode->variation) {
-                                                    Notification::make()
-                                                        ->title('Product not found')
-                                                        ->danger()
-                                                        ->duration(1000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                $variation = $barcode->variation;
-
-                                                // Ensure variation is a model instance, not an array
-                                                if (! $variation || ! ($variation instanceof Variation)) {
-                                                    Notification::make()
-                                                        ->title('Product variation not found')
-                                                        ->danger()
-                                                        ->duration(1000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                // Reload variation to ensure it's a fresh model instance
-                                                $variation = Variation::find($variation->id);
-                                                if (! $variation) {
-                                                    Notification::make()
-                                                        ->title('Product variation not found')
-                                                        ->danger()
-                                                        ->duration(1000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                $product = $variation->product;
-
-                                                // Check if product is preparable (should not be added as nested item)
-                                                if ($product && $product->is_preparable) {
-                                                    Notification::make()
-                                                        ->title('Preparable products cannot be added as nested items')
-                                                        ->danger()
-                                                        ->duration(2000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                // Get all preparable_variations from root level
-                                                // We're inside preparable_variations.{index}.preparable_product_search
-                                                // So we need to go up to root level: ../../preparable_variations
-                                                $preparableVariations = $get('../../preparable_variations') ?? [];
-
-                                                if (empty($preparableVariations)) {
-                                                    Notification::make()
-                                                        ->title('Please add a preparable product first')
-                                                        ->warning()
-                                                        ->duration(2000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                // CRITICAL: Identify which preparable variation this search field belongs to
-                                                // We're inside preparable_variations.{index}.preparable_product_search
-                                                // Strategy: Use instance_id first (most reliable for multiple instances of same variation)
-                                                // Then fall back to other methods
-                                                $currentIndex = null;
-
-                                                // FIRST: Try to get instance_id from parent context (most reliable)
-                                                $currentInstanceId = $get('instance_id');
-                                                if (! $currentInstanceId) {
-                                                    $currentInstanceId = $get('../instance_id');
-                                                }
-
-                                                if ($currentInstanceId) {
-                                                    // Match by instance_id - this is unique for each preparable variation instance
-                                                    foreach ($preparableVariations as $index => $preparableVariation) {
-                                                        $instanceId = $preparableVariation['instance_id'] ?? null;
-                                                        if ($instanceId == $currentInstanceId) {
-                                                            $currentIndex = $index;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-
-                                                // SECOND: If instance_id matching failed, try to get preparable_items and match by content
-                                                // This helps when instance_id is not yet set
-                                                if ($currentIndex === null) {
-                                                    // Try to get preparable_items directly from parent context
-                                                    try {
-                                                        $preparableItems = $get('../preparable_items');
-                                                        if (! is_array($preparableItems)) {
-                                                            $preparableItems = [];
-                                                        }
-                                                    } catch (\Exception $e) {
-                                                        $preparableItems = [];
-                                                    }
-
-                                                    // Match by comparing items - find variation that contains these exact items
-                                                    foreach ($preparableVariations as $index => $preparableVariation) {
-                                                        $variationItems = $preparableVariation['preparable_items'] ?? [];
-                                                        if (! is_array($variationItems)) {
-                                                            $variationItems = [];
-                                                        }
-
-                                                        // Match by comparing items - check if arrays are identical
-                                                        $matches = true;
-                                                        if (count($preparableItems) !== count($variationItems)) {
-                                                            $matches = false;
-                                                        } else {
-                                                            foreach ($preparableItems as $currentItem) {
-                                                                $found = false;
-                                                                foreach ($variationItems as $variationItem) {
-                                                                    if (($currentItem['variation_id'] ?? null) == ($variationItem['variation_id'] ?? null) &&
-                                                                        ($currentItem['stock_id'] ?? null) == ($variationItem['stock_id'] ?? null)) {
-                                                                        $found = true;
-                                                                        break;
-                                                                    }
-                                                                }
-                                                                if (! $found) {
-                                                                    $matches = false;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-
-                                                        if ($matches) {
-                                                            $currentIndex = $index;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-
-                                                // THIRD: Fallback - try variation_id and description (less reliable for multiple instances)
-                                                if ($currentIndex === null) {
-                                                    $currentVariationId = $get('variation_id');
-                                                    if (! $currentVariationId) {
-                                                        $currentVariationId = $get('../variation_id');
-                                                    }
-
-                                                    $currentDescription = $get('description');
-                                                    if (! $currentDescription) {
-                                                        $currentDescription = $get('../description');
-                                                    }
-
-                                                    // Try to match by variation_id + description combination
-                                                    if ($currentVariationId && $currentDescription) {
-                                                        foreach ($preparableVariations as $index => $preparableVariation) {
-                                                            $variationId = $preparableVariation['variation_id'] ?? null;
-                                                            $description = $preparableVariation['description'] ?? null;
-                                                            if ($variationId == $currentVariationId && $description == $currentDescription) {
-                                                                // Only match if this variation has no items yet (to avoid matching wrong instance)
-                                                                $variationItems = $preparableVariation['preparable_items'] ?? [];
-                                                                if (empty($variationItems)) {
-                                                                    $currentIndex = $index;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-
-                                                // If we still couldn't find a match, show error
-                                                if ($currentIndex === null) {
-                                                    Notification::make()
-                                                        ->title('Could not identify preparable variation')
-                                                        ->body('Please try adding the item again.')
-                                                        ->warning()
-                                                        ->duration(2000)
-                                                        ->send();
-                                                    $set('preparable_product_search', null);
-
-                                                    return;
-                                                }
-
-                                                // Get preparable_items for the identified variation
-                                                $preparableItems = $preparableVariations[$currentIndex]['preparable_items'] ?? [];
-                                                if (! is_array($preparableItems)) {
-                                                    $preparableItems = [];
-                                                }
-
-                                                // Check if this variation already exists in preparable_items
-                                                $found = false;
-                                                foreach ($preparableItems as $key => &$item) {
-                                                    if (($item['variation_id'] ?? null) == $variation->id) {
-                                                        // Increment quantity if already exists
-                                                        $item['quantity'] = round(($item['quantity'] ?? 1) + 1, 4);
-                                                        // Recalculate discount based on unit_discount
-                                                        $unitDiscount = isset($item['unit_discount']) ? (float) $item['unit_discount'] : 0;
-                                                        $item['disc'] = self::formatNumberForState($unitDiscount * $item['quantity']);
-                                                        // Recalculate total
-                                                        $item['total'] = round(($item['unit_price'] * $item['quantity']) - $item['disc'], 2);
-                                                        // Ensure item_id exists (for backward compatibility)
-                                                        if (! isset($item['item_id'])) {
-                                                            $item['item_id'] = self::makeDraftPreparableItemId(
-                                                                $item['variation_id'] ?? null,
-                                                                $item['stock_id'] ?? null,
-                                                                $preparableItems,
-                                                            );
-                                                        }
-                                                        $found = true;
-                                                        break;
-                                                    }
-                                                }
-                                                unset($item);
-
-                                                if (! $found) {
-                                                    $description = $variation->brand_name
-                                                        ? $variation->sku.' - '.$variation->brand_name.' - '.$variation->description
-                                                        : $variation->sku.' - '.$variation->description;
-
-                                                    // Calculate base price and sale price (always from variation, never from barcode)
-                                                    $basePrice = $variation->price ?? 0;
-                                                    $salePrice = $variation->sale_price ?? $basePrice;
-                                                    $discountAmount = round($basePrice - $salePrice, 2);
-
-                                                    $preparableItems[] = [
-                                                        'item_id' => self::makeDraftPreparableItemId($variation->id, $barcode->id, $preparableItems),
-                                                        'variation_id' => $variation->id,
-                                                        'stock_id' => $barcode->id,
-                                                        'description' => $description,
-                                                        'quantity' => 1,
-                                                        'unit_price' => round($basePrice, 2),
-                                                        'unit_discount' => round($discountAmount, 2), // Per-unit discount
-                                                        'disc' => round($discountAmount, 2),
-                                                        'total' => round($salePrice, 2),
-                                                    ];
-                                                }
-
-                                                // Update the preparable_items in the full array
-                                                if ($currentIndex !== null && isset($preparableVariations[$currentIndex])) {
-                                                    $preparableVariations[$currentIndex]['preparable_items'] = array_values($preparableItems);
-
-                                                    // Update the entire preparable_variations array from root
-                                                    $set('../../preparable_variations', array_values($preparableVariations));
-
-                                                    // Recalculate the preparable variation total and summary
-                                                    SaleForm::recalcPreparableVariationLine($get, $set, '../../preparable_variations');
-                                                }
-
-                                                // Clear the search field
-                                                $set('preparable_product_search', null);
-
-                                                Notification::make()
-                                                    ->title('Product added to preparable items')
-                                                    ->success()
-                                                    ->duration(1000)
-                                                    ->send();
-                                            }),
+                                            ->afterStateUpdated(fn ($state, $set, $get) => self::handlePreparableProductSearch($state, $set, $get)),
                                         Repeater::make('preparable_items')
                                             ->hiddenLabel()
                                             ->default([])
                                             ->deletable()
                                             ->addable(false)
                                             ->reorderable(false)
-                                            ->afterStateUpdated(function ($state, $set, $get) {
-
-                                                // Ensure all items have item_id
-                                                if (is_array($state)) {
-                                                    $updated = false;
-                                                    foreach ($state as &$item) {
-                                                        if (! isset($item['item_id']) || empty($item['item_id'])) {
-                                                            $item['item_id'] = self::makeDraftPreparableItemId(
-                                                                $item['variation_id'] ?? null,
-                                                                $item['stock_id'] ?? null,
-                                                                $state,
-                                                            );
-                                                            $updated = true;
-                                                        }
-                                                    }
-                                                    unset($item);
-                                                    if ($updated) {
-                                                        $set('../preparable_items', array_values($state));
-                                                    }
-                                                }
-
-                                                // CRITICAL: When items are deleted, recalculate the parent preparable variation's total
-                                                // Get the parent preparable variation's data
-                                                // We're in preparable_variations.{index}.preparable_items context
-                                                // Structure: preparable_variations[0].preparable_items[0]
-                                                // To get to preparable_variations array: go up 2 levels (../../)
-                                                $preparableVariations = $get('../../preparable_variations') ?? [];
-
-                                                // Try to get parent instance_id, variation_id and description from form fields
-                                                // Prioritize instance_id (most reliable for multiple instances of same variation)
-                                                $parentInstanceId = $get('../../instance_id');
-                                                $parentVariationId = $get('../../variation_id');
-                                                $parentDescription = $get('../../description');
-
-                                                // Store these variables outside the loop so they're accessible after the loop
-                                                $foundIndex = null;
-                                                $calculatedPreparableTotal = null;
-
-                                                if (! empty($preparableVariations) && is_array($preparableVariations)) {
-                                                    // If we only have one preparable variation, it must be the parent
-                                                    // This is a fallback when identification doesn't work
-                                                    $useFirstVariationAsParent = count($preparableVariations) === 1;
-
-                                                    foreach ($preparableVariations as $index => &$variation) {
-                                                        // Find the parent preparable variation
-                                                        // Prioritize instance_id matching (most reliable)
-                                                        $isParent = false;
-
-                                                        // FIRST: Try to match by instance_id (most reliable)
-                                                        if ($parentInstanceId && ($variation['instance_id'] ?? null) == $parentInstanceId) {
-                                                            $isParent = true;
-                                                        } elseif ($parentVariationId && ($variation['variation_id'] ?? null) == $parentVariationId) {
-                                                            // SECOND: Fallback to variation_id (less reliable when multiple instances exist)
-                                                            // Only use this if instance_id matching failed
-                                                            $isParent = true;
-                                                        } elseif ($parentDescription && ($variation['description'] ?? null) == $parentDescription) {
-                                                            // THIRD: Fallback to description (least reliable)
-                                                            $isParent = true;
-                                                        } elseif ($useFirstVariationAsParent) {
-                                                            // FINAL FALLBACK: If there's only one variation, it must be the parent
-                                                            $isParent = true;
-                                                        }
-
-                                                        if ($isParent) {
-                                                            // Store the index and total for use after the loop
-                                                            $foundIndex = $index;
-                                                            // Get the updated preparable_items array (this is the NEW state after deletion)
-                                                            $preparableItems = $state ?? [];
-                                                            if (! is_array($preparableItems)) {
-                                                                $preparableItems = [];
-                                                            }
-
-                                                            // Calculate items total from remaining items
-                                                            // Calculate total from all nested items (remaining items after deletion)
-                                                            $itemsTotal = 0;
-                                                            foreach ($preparableItems as $item) {
-                                                                $itemQty = isset($item['quantity']) ? (float) $item['quantity'] : 1;
-                                                                $itemUnitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : 0;
-
-                                                                // Get discount amount - use discount_amount for percentage discounts, otherwise use disc field
-                                                                $itemDiscountType = isset($item['discount_type']) ? $item['discount_type'] : 'flat';
-                                                                if ($itemDiscountType === 'percentage') {
-                                                                    // For percentage discounts, use discount_amount (already calculated)
-                                                                    $itemDisc = isset($item['discount_amount']) ? (float) $item['discount_amount'] : 0;
-                                                                } else {
-                                                                    // For flat discounts, use disc field
-                                                                    // Handle case where disc might be a string (shouldn't happen for flat, but safety check)
-                                                                    $discValue = $item['disc'] ?? 0;
-                                                                    if (is_string($discValue) && str_contains($discValue, '%')) {
-                                                                        // This shouldn't happen, but if it does, treat as 0
-                                                                        $itemDisc = 0;
-                                                                    } else {
-                                                                        $itemDisc = (float) $discValue;
-                                                                    }
-                                                                }
-
-                                                                $itemsTotal += ($itemUnitPrice * $itemQty) - $itemDisc;
-                                                            }
-
-                                                            // Calculate preparable variation total
-                                                            // CRITICAL: Read values from the variation array, not from form fields
-                                                            // The variation array contains the current state
-                                                            $preparableQty = isset($variation['qty']) ? (float) $variation['qty'] : 1;
-                                                            $preparablePrice = isset($variation['price']) ? (float) $variation['price'] : 0;
-
-                                                            // Ensure preparablePrice is not null/empty - if it is, it might be 0
-                                                            // This could happen if the preparable product doesn't have a price set
-
-                                                            // Get preparable discount
-                                                            $preparableDiscountType = isset($variation['discount_type']) ? $variation['discount_type'] : 'flat';
-                                                            if ($preparableDiscountType === 'percentage') {
-                                                                // For percentage discounts, use discount_amount (already calculated)
-                                                                $preparableDisc = isset($variation['discount_amount']) ? (float) $variation['discount_amount'] : 0;
-                                                            } else {
-                                                                // For flat discounts, use disc field
-                                                                // Handle case where disc might be a string (shouldn't happen for flat, but safety check)
-                                                                $discValue = $variation['disc'] ?? 0;
-                                                                if (is_string($discValue) && str_contains($discValue, '%')) {
-                                                                    // This shouldn't happen, but if it does, treat as 0
-                                                                    $preparableDisc = 0;
-                                                                } else {
-                                                                    $preparableDisc = (float) $discValue;
-                                                                }
-                                                            }
-
-                                                            // Calculate preparable variation total: ((preparable_price + items_total) * preparable_qty) - preparable_disc
-                                                            $preparableTotal = round((($preparablePrice + $itemsTotal) * $preparableQty) - $preparableDisc, 2);
-
-                                                            // Store the calculated total for use after the loop
-                                                            $calculatedPreparableTotal = $preparableTotal;
-
-                                                            // CRITICAL: Update the preparable variation's total in the array FIRST
-                                                            $preparableVariations[$index]['total'] = $preparableTotal;
-                                                            $preparableVariations[$index]['preparable_items'] = array_values($preparableItems);
-
-                                                            // CRITICAL: Update the entire array at root level
-                                                            // We're in preparable_variations.{index}.preparable_items context
-                                                            // To update at root level, go up 2 levels: ../../preparable_variations
-                                                            $set('../../preparable_variations', array_values($preparableVariations));
-
-                                                            // CRITICAL: Update the preparable variation's total form field directly
-                                                            // This ensures the UI shows the correct value immediately
-                                                            // We're in preparable_items context, so go up 2 levels to get to preparable_variation level
-                                                            $set('../../total', $preparableTotal);
-
-                                                            break;
-                                                        }
-                                                    }
-                                                    unset($variation);
-                                                }
-
-                                                // CRITICAL: Recalculate summary AFTER updating the array
-                                                // Use root-level paths since we're in a nested repeater
-                                                // The paths need to go up to the root level
-                                                // IMPORTANT: recalcSummary reads from the array but doesn't update individual preparable variation totals
-                                                // So we've already updated the total above, and recalcSummary will use that updated value
-                                                SaleForm::recalcSummary(
-                                                    $get,
-                                                    $set,
-                                                    '../../../../variations', // Regular variations at root (go up 4 levels from preparable_items)
-                                                    '../../preparable_variations', // Preparable variations (go up 2 levels from preparable_items)
-                                                    'preparable_items', // Field name within each preparable variation
-                                                    '../../../../subtotal',
-                                                    '../../../../total',
-                                                    '../../../../total_tax',
-                                                    '../../../../discount',
-                                                    '../../../../freight_fare'
-                                                );
-
-                                                // CRITICAL: After recalcSummary, ensure the preparable variation's total field is still correct
-                                                // Sometimes Filament might not have processed the update yet, so we verify and update again
-                                                // Use the stored $foundIndex and $calculatedPreparableTotal variables
-                                                if ($foundIndex !== null && $calculatedPreparableTotal !== null) {
-                                                    $finalCheckPreparableVariations = $get('../../preparable_variations') ?? [];
-                                                    if (isset($finalCheckPreparableVariations[$foundIndex])) {
-                                                        $finalCheckPreparableVariations[$foundIndex]['total'] = $calculatedPreparableTotal;
-                                                        $set('../../preparable_variations', array_values($finalCheckPreparableVariations));
-                                                        $set('../../total', $calculatedPreparableTotal);
-                                                    }
-                                                }
-                                            })
+                                            ->afterStateUpdated(fn ($state, $set, $get) => self::handlePreparableItemsUpdate($state, $set, $get))
                                             ->table([
                                                 Repeater\TableColumn::make('Description')->width('45%'),
                                                 Repeater\TableColumn::make('Qty')->width('12%'),
@@ -1545,19 +577,14 @@ class SaleForm
                                                         'x-on:focus' => '$event.target.select && $event.target.select()',
                                                     ])
                                                     ->afterStateUpdated(function ($state, $set, $get) {
-                                                        // CRITICAL: Ensure item_id is set before any operations
-                                                        // This ensures we can always identify which item is being updated
                                                         $currentItemId = $get('item_id');
                                                         $variationId = $get('variation_id');
                                                         $stockId = $get('stock_id');
-
-                                                        // If still no item_id, generate one (shouldn't happen, but safety net)
                                                         if (empty($currentItemId)) {
                                                             try {
                                                                 $preparableItems = $get('../../preparable_items') ?? [];
                                                                 $currentItemId = self::makeDraftPreparableItemId(
-                                                                    $variationId,
-                                                                    $stockId,
+                                                                    $variationId, $stockId,
                                                                     is_array($preparableItems) ? $preparableItems : [],
                                                                 );
                                                             } catch (\Exception $e) {
@@ -1565,60 +592,28 @@ class SaleForm
                                                             }
                                                             $set('item_id', $currentItemId);
                                                         }
-
-                                                        // Round to 6 decimal places, allow negative quantities
                                                         $quantity = round((float) ($state ?: 1), 6);
-                                                        // Ensure quantity is not zero
                                                         if ($quantity == 0) {
                                                             $quantity = $quantity > 0 ? 1 : -1;
                                                         }
                                                         $set('quantity', $quantity);
-
-                                                        // If discount type is percentage, recalculate the discount amount
                                                         if ($get('discount_type') === 'percentage') {
                                                             $unitPrice = (float) ($get('unit_price') ?: 0);
                                                             $percentage = (float) ($get('discount_percentage') ?? 0);
-                                                            $subtotalBeforeDiscount = $unitPrice * abs($quantity);
-
-                                                            // Recalculate discount amount from percentage
-                                                            // Use absolute value for calculation, then apply sign
-                                                            $discountAmount = ($subtotalBeforeDiscount * abs($percentage)) / 100;
-                                                            // Apply negative sign if percentage is negative or quantity is negative
-                                                            if ($percentage < 0 || $quantity < 0) {
-                                                                $discountAmount = $discountAmount * -1;
-                                                            }
-                                                            $discountAmount = round($discountAmount, 2);
-
-                                                            // Always preserve percentage format in display
-                                                            $set('disc', self::formatPercentage($percentage));
-                                                            // Update unit_discount - preserve sign when quantity is negative
-                                                            if ($quantity != 0) {
-                                                                $unitDiscount = $discountAmount / $quantity;
-                                                            } else {
-                                                                $unitDiscount = 0;
-                                                            }
-                                                            $set('unit_discount', round($unitDiscount, 2));
-                                                            $set('discount_amount', $discountAmount);
+                                                            self::recalcPercentDiscount($quantity, $unitPrice * abs($quantity), $percentage, $set, 'disc');
                                                         } else {
-                                                            // Recalculate discount based on unit_discount
                                                             $unitDiscount = (float) ($get('unit_discount') ?? 0);
                                                             if ($unitDiscount != 0) {
-                                                                // Use quantity (not abs) to preserve sign when quantity is negative
-                                                                $discount = round($unitDiscount * $quantity, 2);
-                                                                $set('disc', self::formatNumberForState($discount));
+                                                                $set('disc', self::formatNumberForState(round($unitDiscount * $quantity, 2)));
                                                             } else {
-                                                                // If no unit_discount, adjust sign based on quantity
                                                                 $currentDiscount = (float) ($get('disc') ?? 0);
                                                                 if ($quantity < 0 && $currentDiscount > 0) {
-                                                                    // If quantity becomes negative and discount is positive, make discount negative
                                                                     $set('disc', self::formatNumberForState($currentDiscount * -1));
                                                                 } elseif ($quantity >= 0 && $currentDiscount < 0) {
-                                                                    // If quantity becomes positive and discount is negative, make discount positive
                                                                     $set('disc', self::formatNumberForState(abs($currentDiscount)));
                                                                 }
                                                             }
                                                         }
-
                                                         SaleForm::recalcPreparableItemLine($get, $set);
                                                     }),
                                                 TextInput::make('unit_price')
@@ -1635,90 +630,35 @@ class SaleForm
                                                         'data-sale-item-input' => 'true',
                                                         'x-on:focus' => '$event.target.select && $event.target.select()',
                                                     ])
-                                                    ->extraAttributes([
-                                                        'class' => 'price-field-wrapper',
-                                                        'x-data' => '{}',
-                                                        'x-init' => "\$nextTick(() => {
-                                                            const styleId = 'price-helper-style';
-                                                            if (!document.getElementById(styleId)) {
-                                                                const style = document.createElement('style');
-                                                                style.id = styleId;
-                                                                style.textContent = '.price-field-wrapper .fi-sc-text, .fi-input-wrapper:has(input[data-price-input]) .fi-sc-text { font-size: 0.3rem !important; line-height: 0.35rem !important; opacity: 0.5 !important; margin-top: 0.0625rem !important; color: rgb(107 114 128) !important; }';
-                                                                document.head.appendChild(style);
-                                                            }
-                                                        })",
-                                                    ])
+                                                    ->extraAttributes(self::priceExtraAttributes())
                                                     ->helperText(function ($get) {
-                                                        $unitPrice = (float) ($get('unit_price') ?? 0);
-                                                        $quantity = (float) ($get('quantity') ?? 1);
-
-                                                        // Get discount amount - use discount_amount for percentage discounts, otherwise use disc field
                                                         $discountType = $get('discount_type');
-                                                        if ($discountType === 'percentage') {
-                                                            // For percentage discounts, use the calculated discount_amount
-                                                            $discountAmount = (float) ($get('discount_amount') ?? 0);
-                                                        } else {
-                                                            // For flat discounts, use the disc field directly
-                                                            $disc = $get('disc');
-                                                            $discountAmount = is_string($disc) && str_contains($disc, '%') ? 0 : (float) $disc;
-                                                        }
+                                                        $disc = $discountType === 'percentage'
+                                                            ? (float) ($get('discount_amount') ?? 0)
+                                                            : (float) ($get('disc') ?? 0);
+                                                        $qty = abs((float) ($get('quantity') ?? 1));
+                                                        $unitDiscount = $qty > 0 ? abs($disc) / $qty : 0;
 
-                                                        // Only show helper text if there's a discount applied and quantity > 0
-                                                        if ($discountAmount != 0 && $unitPrice > 0 && abs($quantity) > 0) {
-                                                            // Calculate per-unit discount
-                                                            $unitDiscount = abs($discountAmount) / abs($quantity);
-                                                            // Calculate price after discount per unit
-                                                            $priceAfterDiscount = $unitPrice - $unitDiscount;
-
-                                                            if ($priceAfterDiscount > 0) {
-                                                                // Get smallest integer (floor)
-                                                                $priceAfterDiscountInteger = (int) floor($priceAfterDiscount);
-
-                                                                if ($priceAfterDiscountInteger > 0) {
-                                                                    return "1x={$priceAfterDiscountInteger}";
-                                                                }
-                                                            }
-                                                        }
-
-                                                        return null;
+                                                        return self::priceHelperText((float) ($get('unit_price') ?? 0), $unitDiscount);
                                                     })
                                                     ->afterStateUpdated(function ($state, $set, $get) {
                                                         $unitPrice = round((float) $state, 2);
                                                         if ((float) $state !== $unitPrice) {
                                                             $set('unit_price', $unitPrice);
                                                         }
-
-                                                        // If there's a percentage discount, recalculate discount_amount based on new unit_price
-                                                        $discountType = $get('discount_type');
-                                                        if ($discountType === 'percentage') {
+                                                        if ($get('discount_type') === 'percentage') {
                                                             $quantity = (float) ($get('quantity') ?: 1);
-                                                            $subtotalBeforeDiscount = $unitPrice * abs($quantity);
                                                             $discountPercentage = (float) ($get('discount_percentage') ?? 0);
-
-                                                            // Recalculate discount amount from percentage
-                                                            $discountAmount = ($subtotalBeforeDiscount * $discountPercentage) / 100;
+                                                            $discountAmount = round($unitPrice * abs($quantity) * $discountPercentage / 100, 2);
                                                             if ($quantity < 0) {
-                                                                $discountAmount = $discountAmount * -1;
-                                                            }
-                                                            $discountAmount = round($discountAmount, 2);
-
-                                                            // Update discount_amount and unit_discount
-                                                            $set('discount_amount', $discountAmount);
-                                                            if ($quantity != 0) {
-                                                                $unitDiscount = $discountAmount / $quantity;
-                                                            } else {
-                                                                $unitDiscount = 0;
-                                                            }
-                                                            $set('unit_discount', round($unitDiscount, 2));
-
-                                                            // Update display value
-                                                            if ($quantity < 0) {
+                                                                $discountAmount *= -1;
                                                                 $set('disc', self::formatNumberForState($discountAmount));
                                                             } else {
                                                                 $set('disc', self::formatPercentage($discountPercentage));
                                                             }
+                                                            $set('discount_amount', $discountAmount);
+                                                            $set('unit_discount', round($quantity != 0 ? $discountAmount / $quantity : 0, 2));
                                                         }
-
                                                         SaleForm::recalcPreparableItemLine($get, $set);
                                                     }),
                                                 TextInput::make('disc')
@@ -1731,130 +671,14 @@ class SaleForm
                                                         'data-sale-item-input' => 'true',
                                                         'x-on:focus' => '$event.target.select && $event.target.select()',
                                                     ])
-                                                    ->helperText(function ($get) {
-                                                        $quantity = (float) ($get('quantity') ?? 1);
-                                                        $disc = $get('disc');
-
-                                                        // Don't show helper text for percentage discounts
-                                                        if (is_string($disc) && str_contains($disc, '%')) {
-                                                            return null;
-                                                        }
-
-                                                        // Only show hint if quantity > 1 and there's a discount
-                                                        if (abs($quantity) > 1 && $disc !== null && $disc !== '') {
-                                                            // Flat discount - use the discount value directly
-                                                            $discountAmount = (float) $disc;
-
-                                                            if ($discountAmount != 0) {
-                                                                // Calculate per-unit discount
-                                                                $unitDiscount = abs($discountAmount) / abs($quantity);
-                                                                // Get smallest integer (floor)
-                                                                $unitDiscountInteger = (int) floor($unitDiscount);
-
-                                                                if ($unitDiscountInteger > 0) {
-                                                                    return "1x={$unitDiscountInteger}";
-                                                                }
-                                                            }
-                                                        }
-
-                                                        return null;
-                                                    })
+                                                    ->helperText(fn ($get) => self::discHelperText(
+                                                        (float) ($get('quantity') ?? 1),
+                                                        $get('disc'),
+                                                    ))
                                                     ->afterStateUpdated(function ($state, $set, $get) {
                                                         $quantity = (float) ($get('quantity') ?: 1);
                                                         $unitPrice = (float) ($get('unit_price') ?: 0);
-                                                        $subtotalBeforeDiscount = $unitPrice * abs($quantity);
-
-                                                        // Check if state contains percentage symbol
-                                                        if (is_string($state) && str_contains($state, '%')) {
-                                                            // Extract the percentage value
-                                                            $rawPercentage = str_replace('%', '', trim($state));
-
-                                                            // Validate format - must be numeric
-                                                            if (! is_numeric($rawPercentage)) {
-                                                                $set('disc', '');
-                                                                $set('discount_type', null);
-                                                                $set('discount_percentage', null);
-
-                                                                return;
-                                                            }
-
-                                                            $percentage = (float) $rawPercentage;
-
-                                                            // Validate percentage range based on quantity
-                                                            // For returns (negative quantity), allow -999.999999 to 999.999999
-                                                            // For normal sales (positive quantity), allow 0 to 999.999999
-                                                            if ($quantity < 0) {
-                                                                // Return case: allow negative percentages (-999.999999 to 999.999999)
-                                                                if ($percentage < -999.999999) {
-                                                                    $percentage = -999.999999;
-                                                                } elseif ($percentage > 999.999999) {
-                                                                    $percentage = 999.999999;
-                                                                }
-                                                            } else {
-                                                                // Normal sale: allow 0 to 999.999999
-                                                                if ($percentage < 0) {
-                                                                    $percentage = 0;
-                                                                } elseif ($percentage > 999.999999) {
-                                                                    $percentage = 999.999999;
-                                                                }
-                                                            }
-
-                                                            $percentage = round($percentage, 6); // Round to 6 decimals
-
-                                                            // Calculate discount amount from percentage
-                                                            // Use absolute value for calculation, then apply sign
-                                                            $discountAmount = ($subtotalBeforeDiscount * abs($percentage)) / 100;
-                                                            // Apply negative sign if percentage is negative or quantity is negative
-                                                            if ($percentage < 0 || $quantity < 0) {
-                                                                $discountAmount = $discountAmount * -1;
-                                                            }
-                                                            $discountAmount = round($discountAmount, 2);
-
-                                                            // Store that this is a percentage discount
-                                                            $set('discount_type', 'percentage');
-                                                            $set('discount_percentage', $percentage);
-
-                                                            // Update the display value - show percentage format
-                                                            $set('disc', self::formatPercentage($percentage));
-
-                                                            // Update unit_discount - preserve sign when quantity is negative
-                                                            if ($quantity != 0) {
-                                                                $unitDiscount = $discountAmount / $quantity;
-                                                            } else {
-                                                                $unitDiscount = 0;
-                                                            }
-                                                            $set('unit_discount', round($unitDiscount, 2));
-                                                            // Store the calculated amount in a hidden field for calculations
-                                                            $set('discount_amount', $discountAmount);
-                                                        } else {
-                                                            // Treat as flat discount amount and round to 2 decimal places
-                                                            // Automatically set discount to negative when quantity is negative (return case)
-                                                            $discountAmount = (float) $state;
-                                                            if ($quantity < 0) {
-                                                                // For negative quantity, automatically make discount negative
-                                                                $discountAmount = abs($discountAmount) * -1;
-                                                            } else {
-                                                                // For positive quantity, ensure discount is non-negative
-                                                                $discountAmount = max(0, $discountAmount);
-                                                            }
-                                                            $discountAmount = round($discountAmount, 2);
-                                                            $set('disc', self::formatNumberForState($discountAmount));
-
-                                                            // Store that this is a flat discount
-                                                            $set('discount_type', 'flat');
-                                                            $set('discount_percentage', null);
-
-                                                            // Update unit_discount - preserve sign when quantity is negative
-                                                            if ($quantity != 0) {
-                                                                $unitDiscount = $discountAmount / $quantity;
-                                                            } else {
-                                                                $unitDiscount = 0;
-                                                            }
-                                                            $set('unit_discount', round($unitDiscount, 2));
-                                                            $set('discount_amount', $discountAmount);
-                                                        }
-
-                                                        // Recalculate item line and parent variation
+                                                        self::applyDiscountInput($state, $quantity, $unitPrice * abs($quantity), $set, 'disc');
                                                         SaleForm::recalcPreparableItemLine($get, $set);
                                                     }),
                                                 TextInput::make('total')
@@ -1868,33 +692,17 @@ class SaleForm
                                                         'x-on:focus' => '$event.target.select && $event.target.select()',
                                                     ])
                                                     ->afterStateUpdated(function ($state, $set, $get) {
-                                                        // When total is changed, calculate new discount
                                                         $quantity = (float) ($get('quantity') ?: 1);
                                                         $rawTotal = round((float) $state, 2);
                                                         $newTotal = $quantity >= 0 ? round(max(0, $rawTotal), 2) : $rawTotal;
                                                         $set('total', $newTotal);
-
                                                         $unitPrice = (float) ($get('unit_price') ?: 0);
-
-                                                        // Calculate what the discount should be: (unitPrice * quantity) - newTotal
-                                                        $calculatedDisc = ($unitPrice * $quantity) - $newTotal;
-                                                        // Allow negative discount when quantity is negative
+                                                        $calculatedDisc = round(($unitPrice * $quantity) - $newTotal, 2);
                                                         if ($quantity >= 0) {
                                                             $calculatedDisc = max(0, $calculatedDisc);
                                                         }
-                                                        $calculatedDisc = round($calculatedDisc, 2);
-
                                                         $set('disc', self::formatNumberForState($calculatedDisc));
-
-                                                        // Update unit_discount based on quantity
-                                                        if ($quantity != 0) {
-                                                            $unitDiscount = $calculatedDisc / $quantity;
-                                                        } else {
-                                                            $unitDiscount = 0;
-                                                        }
-                                                        $set('unit_discount', round($unitDiscount, 2));
-
-                                                        // Recalculate item line and parent variation
+                                                        $set('unit_discount', round($quantity != 0 ? $calculatedDisc / $quantity : 0, 2));
                                                         SaleForm::recalcPreparableItemLine($get, $set);
                                                     }),
                                             ])
@@ -1940,104 +748,51 @@ class SaleForm
                                                 }
                                             })
                                             ->afterStateUpdated(function ($state, $set, $get) {
-                                                // Check if any variation has negative quantity (return case)
-                                                $variations = $get('variations') ?? [];
-                                                $hasNegativeQuantity = false;
-                                                foreach ($variations as $variation) {
-                                                    if (isset($variation['quantity']) && (float) $variation['quantity'] < 0) {
-                                                        $hasNegativeQuantity = true;
+                                                $hasNegative = false;
+                                                foreach ($get('variations') ?? [] as $v) {
+                                                    if ((float) ($v['quantity'] ?? 0) < 0) {
+                                                        $hasNegative = true;
                                                         break;
                                                     }
                                                 }
 
-                                                // Check if state contains percentage symbol
                                                 if (is_string($state) && str_contains($state, '%')) {
-                                                    // Extract the percentage value
-                                                    $rawPercentage = str_replace('%', '', trim($state));
-
-                                                    // Validate format - must be numeric
-                                                    if (! is_numeric($rawPercentage)) {
+                                                    $raw = str_replace('%', '', trim($state));
+                                                    if (! is_numeric($raw)) {
                                                         $set('discount', '');
                                                         $set('sale_discount_type', null);
                                                         $set('sale_discount_percentage', null);
 
                                                         return;
                                                     }
-
-                                                    $percentage = (float) $rawPercentage;
-
-                                                    // Validate percentage range based on whether there are negative quantities
-                                                    // For returns (negative quantity items), allow -999.999999 to 999.999999
-                                                    // For normal sales (all positive quantities), allow 0 to 999.999999
-                                                    if ($hasNegativeQuantity) {
-                                                        // Return case: allow negative percentages (-999.999999 to 999.999999)
-                                                        if ($percentage < -999.999999) {
-                                                            $percentage = -999.999999;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    } else {
-                                                        // Normal sale: allow 0 to 999.999999
-                                                        if ($percentage < 0) {
-                                                            $percentage = 0;
-                                                        } elseif ($percentage > 999.999999) {
-                                                            $percentage = 999.999999;
-                                                        }
-                                                    }
-
-                                                    $percentage = round($percentage, 6);
-
-                                                    // Store percentage discount type
+                                                    $percentage = round(
+                                                        $hasNegative
+                                                            ? max(-999.999999, min(999.999999, (float) $raw))
+                                                            : max(0, min(999.999999, (float) $raw)),
+                                                        6
+                                                    );
                                                     $set('sale_discount_type', 'percentage');
                                                     $set('sale_discount_percentage', $percentage);
-
-                                                    // Calculate discount amount from subtotal
-                                                    $subtotal = (float) ($get('subtotal') ?? 0);
-                                                    // Use absolute value for calculation, then apply sign
-                                                    $discountAmount = ($subtotal * abs($percentage)) / 100;
-                                                    // Apply negative sign if percentage is negative
+                                                    $discountAmount = round((float) ($get('subtotal') ?? 0) * abs($percentage) / 100, 2);
                                                     if ($percentage < 0) {
-                                                        $discountAmount = $discountAmount * -1;
+                                                        $discountAmount *= -1;
                                                     }
-
-                                                    // Allow negative discount when any item has negative quantity
-                                                    if (! $hasNegativeQuantity && $discountAmount < 0) {
+                                                    if (! $hasNegative && $discountAmount < 0) {
                                                         $discountAmount = 0;
                                                     }
-
-                                                    $discountAmount = round($discountAmount, 2);
-
-                                                    // Store the calculated discount amount for saving to DB
                                                     $set('sale_discount_amount', $discountAmount);
-
-                                                    // Update display - preserve percentage format
                                                     $set('discount', self::formatPercentage($percentage));
-
-                                                    // Recalculate totals applying global discount
                                                     SaleForm::recalcSummary($get, $set);
-
-                                                    // Ensure percentage format is preserved after recalculation
                                                     $set('discount', self::formatPercentage($percentage));
 
                                                     return;
                                                 }
 
-                                                // Flat discount amount
-                                                $discount = (float) $state;
-                                                if (! $hasNegativeQuantity) {
-                                                    $discount = max(0, $discount);
-                                                }
-                                                $discount = round($discount, 2);
-
-                                                // Store the discount amount for saving to DB
+                                                $discount = round($hasNegative ? (float) $state : max(0, (float) $state), 2);
                                                 $set('sale_discount_amount', $discount);
                                                 $set('discount', self::formatNumberForState($discount));
-
-                                                // Clear percentage discount type
                                                 $set('sale_discount_type', 'flat');
                                                 $set('sale_discount_percentage', null);
-
-                                                // Recalculate totals applying global discount
                                                 SaleForm::recalcSummary($get, $set);
                                             }),
                                         TextInput::make('freight_fare')
@@ -2076,7 +831,7 @@ class SaleForm
                                     ->columnSpanFull(),
                                 Section::make()
                                     ->schema([
-                                        \Filament\Forms\Components\Textarea::make('header_note')
+                                        Textarea::make('header_note')
                                             ->label('Header Note')
                                             ->placeholder('Add a header note for this sale (optional)')
                                             ->rows(3)
@@ -2085,7 +840,7 @@ class SaleForm
                                             ->extraInputAttributes([
                                                 'x-on:focus' => '$event.target.select && $event.target.select()',
                                             ]),
-                                        \Filament\Forms\Components\Textarea::make('footer_note')
+                                        Textarea::make('footer_note')
                                             ->label('Footer Note')
                                             ->placeholder('Add a footer note for this sale (optional)')
                                             ->rows(3)
@@ -2134,7 +889,7 @@ class SaleForm
                                                     return false;
                                                 }
                                                 // Show toggle only if POSID is configured for the current environment
-                                                $hasPosId = $store->fbr_environment === \SmartTill\Core\Enums\FbrEnvironment::SANDBOX
+                                                $hasPosId = $store->fbr_environment === FbrEnvironment::SANDBOX
                                                     ? ! empty($store->fbr_sandbox_pos_id)
                                                     : ! empty($store->fbr_pos_id);
 
@@ -3469,129 +2224,21 @@ class SaleForm
                         ])
                         ->all();
 
-                    // Ensure payment_status is an enum instance
-                    $paymentStatusValue = $state['payment_status'] ?? SalePaymentStatus::default();
-                    $paymentStatus = $paymentStatusValue instanceof SalePaymentStatus
-                        ? $paymentStatusValue
-                        : SalePaymentStatus::from($paymentStatusValue);
-                    $paymentMethod = null;
-                    if ($paymentStatus === SalePaymentStatus::Paid) {
-                        $paymentMethodValue = $state['payment_method'] ?? SalePaymentMethod::default();
-                        $paymentMethod = $paymentMethodValue instanceof SalePaymentMethod
-                            ? $paymentMethodValue
-                            : SalePaymentMethod::from($paymentMethodValue);
-                    }
-
-                    // Get discount amount - use sale_discount_amount if available (calculated amount), otherwise parse discount field
-                    $discountAmount = isset($state['sale_discount_amount'])
-                        ? round((float) $state['sale_discount_amount'], 2)
-                        : (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')
-                            ? 0 // If it's a percentage string, we need to calculate it
-                            : round((float) ($state['discount'] ?? 0), 2));
-
-                    // If discount is a percentage string, calculate the amount
-                    if (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')) {
-                        $saleDiscountType = $state['sale_discount_type'] ?? 'flat';
-                        $saleDiscountPercentage = (float) ($state['sale_discount_percentage'] ?? 0);
-                        if ($saleDiscountType === 'percentage' && $saleDiscountPercentage != 0) {
-                            // Recalculate from subtotal
-                            $subtotal = (float) ($state['subtotal'] ?? 0);
-                            $discountAmount = round(($subtotal * abs($saleDiscountPercentage)) / 100, 2);
-                            if ($saleDiscountPercentage < 0) {
-                                $discountAmount = $discountAmount * -1;
-                            }
-                        }
-                    }
-
-                    $updateData = [
-                        'customer_id' => $state['customer_id'] ?? null,
-                        'payment_status' => $paymentStatus,
-                        'payment_method' => $paymentMethod,
-                        'use_fbr' => $state['use_fbr'] ?? false,
-                        'status' => $status,
-                        'discount' => $discountAmount,
-                        'discount_type' => $state['sale_discount_type'] ?? 'flat',
-                        'discount_percentage' => isset($state['sale_discount_type']) && $state['sale_discount_type'] === 'percentage'
-                            ? round((float) ($state['sale_discount_percentage'] ?? 0), 6)
-                            : null,
-                        'freight_fare' => round((float) ($state['freight_fare'] ?? 0), 2),
-                        'note' => $state['header_note'] ?? null,
-                        'header_note' => $state['header_note'] ?? null,
-                        'footer_note' => $state['footer_note'] ?? null,
-                    ];
-
-                    // Set paid_at if payment status is Paid and not already set
+                    [$paymentStatus, $paymentMethod] = self::resolvePaymentEnums($state);
+                    $discountAmount = self::resolveSaleDiscountAmount($state);
+                    $updateData = self::buildSaleAttributes($state, $status, $discountAmount, $paymentStatus, $paymentMethod);
                     if ($paymentStatus === SalePaymentStatus::Paid && ! $sale->paid_at) {
                         $updateData['paid_at'] = now();
                     }
 
-                    // Sync products first (regular variations only)
-                    // Note: PriceCast will handle multiplication, but needs sale_id to resolve store
-                    // We'll use DB::table() to insert directly with multiplied values to bypass cast issues
-                    $multiplier = $sale->currencyMultiplier();
-                    $syncData = [];
-                    foreach ($regularVariations as $variation) {
-                        // Use discount_amount if it's a percentage discount, otherwise use discount
-                        $discountValue = isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
-                            ? (float) ($variation['discount_amount'] ?? 0)
-                            : (float) ($variation['discount'] ?? 0);
-
-                        // Ensure tax is calculated if missing or 0
-                        $taxValue = (float) ($variation['tax'] ?? 0);
-                        if ($taxValue == 0 && $sale->store?->tax_enabled && isset($variation['stock_id']) && $variation['stock_id']) {
-                            $stock = Stock::find($variation['stock_id']);
-                            if ($stock) {
-                                $unitPrice = (float) ($variation['unit_price'] ?? 0);
-                                $taxValue = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($sale->store, $stock, $unitPrice);
-                            }
-                        }
-
-                        $syncData[] = [
-                            'variation_id' => $variation['variation_id'],
-                            'stock_id' => $variation['stock_id'] ?? null,
-                            'description' => $variation['description'],
-                            'quantity' => $variation['quantity'],
-                            'unit_price' => round((float) $variation['unit_price'] * $multiplier),
-                            'tax' => round($taxValue * $multiplier),
-                            'discount' => round($discountValue * $multiplier),
-                            'discount_type' => $variation['discount_type'] ?? 'flat',
-                            'discount_percentage' => isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
-                                ? round((float) ($variation['discount_percentage'] ?? 0), 6)
-                                : null,
-                            'total' => round((float) $variation['total'] * $multiplier),
-                            'supplier_price' => round((float) $variation['supplier_price'] * $multiplier),
-                            'supplier_total' => round((float) $variation['supplier_price'] * $variation['quantity'] * $multiplier),
-                            'is_preparable' => false,
-                        ];
-                    }
-
                     // CRITICAL: Delete existing preparable variations FIRST before syncing
-                    // This is necessary because sync() can't handle multiple instances of the same variation_id
-                    // and will remove preparable variations if we attach them before syncing
                     $sale->variations()->wherePivot('is_preparable', true)->detach();
-
-                    // Delete existing regular variations first
                     $sale->variations()->wherePivot('is_preparable', false)->detach();
 
-                    // Insert regular variations directly using DB to bypass PriceCast issues with pivot models
-                    // PriceCast can't resolve store during sync/attach, so we multiply manually
-                    foreach ($syncData as $data) {
-                        DB::table('sale_variation')->insert([
-                            'sale_id' => $sale->id,
-                            'variation_id' => $data['variation_id'],
-                            'stock_id' => $data['stock_id'],
-                            'description' => $data['description'],
-                            'quantity' => $data['quantity'],
-                            'unit_price' => $data['unit_price'],
-                            'tax' => $data['tax'],
-                            'discount' => $data['discount'],
-                            'discount_type' => $data['discount_type'],
-                            'discount_percentage' => $data['discount_percentage'],
-                            'total' => $data['total'],
-                            'supplier_price' => $data['supplier_price'],
-                            'supplier_total' => $data['supplier_total'],
-                            'is_preparable' => false,
-                        ]);
+                    // Insert regular variations directly using DB to bypass PriceCast issues
+                    $multiplier = $sale->currencyMultiplier();
+                    foreach (self::buildVariationRows($regularVariations, $sale->id, $multiplier, $sale->store) as $row) {
+                        DB::table('sale_variation')->insert($row);
                     }
 
                     DB::table('sale_variation')
@@ -3655,114 +2302,11 @@ class SaleForm
 
                     if (! empty($customVariations)) {
                         $sale->loadMissing('store.currency');
-                        $multiplier = $sale->currencyMultiplier();
-
-                        $customRows = array_map(function ($item) use ($sale, $multiplier) {
-                            $discountValue = isset($item['discount_type']) && $item['discount_type'] === 'percentage'
-                                ? (float) ($item['discount_amount'] ?? 0)
-                                : (float) ($item['discount'] ?? 0);
-
-                            $quantity = (float) ($item['quantity'] ?? 0);
-                            $lineTotal = (float) ($item['total'] ?? 0);
-                            $supplierPrice = $quantity != 0 ? $lineTotal / $quantity : 0.0;
-
-                            return [
-                                'sale_id' => $sale->id,
-                                'variation_id' => null,
-                                'stock_id' => null,
-                                'description' => $item['description'] ?? 'Custom item',
-                                'quantity' => $quantity,
-                                'unit_price' => round((float) ($item['unit_price'] ?? 0) * $multiplier),
-                                'tax' => round((float) ($item['tax'] ?? 0) * $multiplier),
-                                'discount' => round($discountValue * $multiplier),
-                                'discount_type' => $item['discount_type'] ?? 'flat',
-                                'discount_percentage' => isset($item['discount_type']) && $item['discount_type'] === 'percentage'
-                                    ? round((float) ($item['discount_percentage'] ?? 0), 6)
-                                    : null,
-                                'total' => round($lineTotal * $multiplier),
-                                'supplier_price' => round($supplierPrice * $multiplier),
-                                'supplier_total' => round($lineTotal * $multiplier),
-                                'is_preparable' => false,
-                            ];
-                        }, $customVariations);
-
-                        DB::table('sale_variation')->insert($customRows);
+                        $customMultiplier = $sale->currencyMultiplier();
+                        DB::table('sale_variation')->insert(self::buildCustomRows($customVariations, $sale->id, $customMultiplier));
                     }
 
-                    // Handle preparable items for update
-                    $preparableVariations = $state['preparable_variations'] ?? [];
-
-                    // Delete existing preparable items for this sale
-                    SalePreparableItem::where('sale_id', $sale->id)->delete();
-
-                    // Save new preparable items
-                    if (! empty($preparableVariations) && is_array($preparableVariations)) {
-                        foreach (array_values($preparableVariations) as $sequence => $preparableVariation) {
-                            $preparableVariationId = $preparableVariation['variation_id'] ?? null;
-                            if (! $preparableVariationId) {
-                                continue;
-                            }
-
-                            $preparableItems = $preparableVariation['preparable_items'] ?? [];
-                            if (! is_array($preparableItems) || empty($preparableItems)) {
-                                continue;
-                            }
-
-                            foreach ($preparableItems as $item) {
-                                $variationId = $item['variation_id'] ?? null;
-                                if (! $variationId) {
-                                    continue;
-                                }
-
-                                // Get discount amount - use discount_amount for percentage discounts, otherwise use disc field
-                                $itemDiscountType = isset($item['discount_type']) ? $item['discount_type'] : 'flat';
-                                $itemDiscountPercentage = $itemDiscountType === 'percentage'
-                                    ? (float) ($item['discount_percentage'] ?? 0)
-                                    : null;
-                                if ($itemDiscountType === 'percentage') {
-                                    $itemDisc = round(($unitPrice * abs($quantity)) * (abs($itemDiscountPercentage) / 100), 2);
-                                    if ($itemDiscountPercentage < 0 || $quantity < 0) {
-                                        $itemDisc = $itemDisc * -1;
-                                    }
-                                } else {
-                                    $discValue = $item['disc'] ?? ($item['discount_amount'] ?? 0);
-                                    if (is_string($discValue) && str_contains($discValue, '%')) {
-                                        $itemDisc = 0;
-                                    } else {
-                                        $itemDisc = (float) $discValue;
-                                    }
-                                }
-
-                                // Get stock_id and calculate supplier price and tax
-                                $stockId = $item['stock_id'] ?? null;
-                                $stock = $stockId ? Stock::find($stockId) : null;
-                                $supplierPrice = $stock ? (float) ($stock->supplier_price ?? 0) : 0;
-                                $quantity = (float) ($item['quantity'] ?? 1);
-                                $unitPrice = round((float) ($item['unit_price'] ?? 0), 2);
-
-                                // Calculate tax similar to regular variations - use effective tax amount (0 if taxes disabled)
-                                $store = Filament::getTenant();
-                                $lineTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
-
-                                SalePreparableItem::create([
-                                    'sale_id' => $sale->id,
-                                    'sequence' => $sequence, // Store sequence to uniquely identify this preparable variation instance
-                                    'preparable_variation_id' => $preparableVariationId,
-                                    'variation_id' => $variationId,
-                                    'stock_id' => $stockId,
-                                    'quantity' => $quantity,
-                                    'unit_price' => $unitPrice,
-                                    'tax' => $lineTax,
-                                    'discount' => round($itemDisc, 2),
-                                    'discount_type' => $itemDiscountType,
-                                    'discount_percentage' => $itemDiscountPercentage,
-                                    'total' => round((float) ($item['total'] ?? 0), 2),
-                                    'supplier_price' => round($supplierPrice, 2),
-                                    'supplier_total' => round($supplierPrice * $quantity, 2),
-                                ]);
-                            }
-                        }
-                    }
+                    self::persistPreparableItems($sale, $state['preparable_variations'] ?? []);
 
                     // Handle transaction reversals BEFORE updating sale to prevent observer conflicts
                     // Use withoutEvents to prevent SaleObserver from interfering with our manual transaction handling
@@ -3786,7 +2330,7 @@ class SaleForm
                         });
 
                         // Now handle all transactions manually (prevents observer conflicts)
-                        $saleTransactionService = app(\SmartTill\Core\Services\SaleTransactionService::class);
+                        $saleTransactionService = app(SaleTransactionService::class);
                         $saleTransactionService->handleSaleEdit(
                             $sale,
                             $oldVariations,
@@ -3809,101 +2353,18 @@ class SaleForm
                     }
                 } else {
                     // Create new sale
-                    // Ensure payment_status is an enum instance
-                    $paymentStatusValue = $state['payment_status'] ?? SalePaymentStatus::default();
-                    $paymentStatus = $paymentStatusValue instanceof SalePaymentStatus
-                        ? $paymentStatusValue
-                        : SalePaymentStatus::from($paymentStatusValue);
-                    $paymentMethod = null;
-                    if ($paymentStatus === SalePaymentStatus::Paid) {
-                        $paymentMethodValue = $state['payment_method'] ?? SalePaymentMethod::default();
-                        $paymentMethod = $paymentMethodValue instanceof SalePaymentMethod
-                            ? $paymentMethodValue
-                            : SalePaymentMethod::from($paymentMethodValue);
-                    }
-
-                    // Get discount amount - use sale_discount_amount if available (calculated amount), otherwise parse discount field
-                    $discountAmount = isset($state['sale_discount_amount'])
-                        ? round((float) $state['sale_discount_amount'], 2)
-                        : (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')
-                            ? 0 // If it's a percentage string, we need to calculate it
-                            : round((float) ($state['discount'] ?? 0), 2));
-
-                    // If discount is a percentage string, calculate the amount
-                    if (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')) {
-                        $saleDiscountType = $state['sale_discount_type'] ?? 'flat';
-                        $saleDiscountPercentage = (float) ($state['sale_discount_percentage'] ?? 0);
-                        if ($saleDiscountType === 'percentage' && $saleDiscountPercentage != 0) {
-                            // Recalculate from subtotal
-                            $subtotal = (float) ($state['subtotal'] ?? 0);
-                            $discountAmount = round(($subtotal * abs($saleDiscountPercentage)) / 100, 2);
-                            if ($saleDiscountPercentage < 0) {
-                                $discountAmount = $discountAmount * -1;
-                            }
-                        }
-                    }
-
-                    $saleData = [
-                        'customer_id' => $state['customer_id'] ?? null,
-                        'payment_status' => $paymentStatus,
-                        'payment_method' => $paymentMethod,
-                        'use_fbr' => $state['use_fbr'] ?? false,
-                        'discount' => $discountAmount,
-                        'discount_type' => $state['sale_discount_type'] ?? 'flat',
-                        'discount_percentage' => isset($state['sale_discount_type']) && $state['sale_discount_type'] === 'percentage'
-                            ? round((float) ($state['sale_discount_percentage'] ?? 0), 6)
-                            : null,
-                        'freight_fare' => round((float) ($state['freight_fare'] ?? 0), 2),
-                        'status' => $status,
-                        'note' => $state['header_note'] ?? null,
-                        'header_note' => $state['header_note'] ?? null,
-                        'footer_note' => $state['footer_note'] ?? null,
-                    ];
-
-                    // Set paid_at if payment status is Paid
+                    [$paymentStatus, $paymentMethod] = self::resolvePaymentEnums($state);
+                    $discountAmount = self::resolveSaleDiscountAmount($state);
+                    $saleData = self::buildSaleAttributes($state, $status, $discountAmount, $paymentStatus, $paymentMethod);
                     if ($paymentStatus === SalePaymentStatus::Paid) {
                         $saleData['paid_at'] = now();
                     }
-
                     $sale = Sale::create($saleData);
 
                     // Insert regular variations directly using DB to bypass PriceCast issues with pivot models
-                    // PriceCast can't resolve store during attach, so we multiply manually
                     $multiplier = $sale->currencyMultiplier();
-                    foreach ($regularVariations as $variation) {
-                        // Use discount_amount if it's a percentage discount, otherwise use discount
-                        $discountValue = isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
-                            ? (float) ($variation['discount_amount'] ?? 0)
-                            : (float) ($variation['discount'] ?? 0);
-
-                        // Ensure tax is calculated if missing or 0
-                        $taxValue = (float) ($variation['tax'] ?? 0);
-                        if ($taxValue == 0 && $sale->store?->tax_enabled && isset($variation['stock_id']) && $variation['stock_id']) {
-                            $stock = Stock::find($variation['stock_id']);
-                            if ($stock) {
-                                $unitPrice = (float) ($variation['unit_price'] ?? 0);
-                                $taxValue = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($sale->store, $stock, $unitPrice);
-                            }
-                        }
-
-                        DB::table('sale_variation')->insert([
-                            'sale_id' => $sale->id,
-                            'variation_id' => $variation['variation_id'],
-                            'stock_id' => $variation['stock_id'] ?? null,
-                            'description' => $variation['description'],
-                            'quantity' => $variation['quantity'],
-                            'unit_price' => round((float) $variation['unit_price'] * $multiplier),
-                            'tax' => round($taxValue * $multiplier),
-                            'discount' => round($discountValue * $multiplier),
-                            'discount_type' => $variation['discount_type'] ?? 'flat',
-                            'discount_percentage' => isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
-                                ? round((float) ($variation['discount_percentage'] ?? 0), 6)
-                                : null,
-                            'total' => round((float) $variation['total'] * $multiplier),
-                            'supplier_price' => round((float) $variation['supplier_price'] * $multiplier),
-                            'supplier_total' => round((float) $variation['supplier_price'] * $variation['quantity'] * $multiplier),
-                            'is_preparable' => false,
-                        ]);
+                    foreach (self::buildVariationRows($regularVariations, $sale->id, $multiplier, $sale->store) as $row) {
+                        DB::table('sale_variation')->insert($row);
                     }
 
                     // Attach preparable variations
@@ -3955,109 +2416,11 @@ class SaleForm
 
                     if (! empty($customVariations)) {
                         $sale->loadMissing('store.currency');
-                        $multiplier = $sale->currencyMultiplier();
-
-                        $customRows = array_map(function ($item) use ($sale, $multiplier) {
-                            $discountValue = isset($item['discount_type']) && $item['discount_type'] === 'percentage'
-                                ? (float) ($item['discount_amount'] ?? 0)
-                                : (float) ($item['discount'] ?? 0);
-
-                            $quantity = (float) ($item['quantity'] ?? 0);
-                            $lineTotal = (float) ($item['total'] ?? 0);
-                            $supplierPrice = $quantity != 0 ? $lineTotal / $quantity : 0.0;
-
-                            return [
-                                'sale_id' => $sale->id,
-                                'variation_id' => null,
-                                'stock_id' => null,
-                                'description' => $item['description'] ?? 'Custom item',
-                                'quantity' => $quantity,
-                                'unit_price' => round((float) ($item['unit_price'] ?? 0) * $multiplier),
-                                'tax' => round((float) ($item['tax'] ?? 0) * $multiplier),
-                                'discount' => round($discountValue * $multiplier),
-                                'discount_type' => $item['discount_type'] ?? 'flat',
-                                'discount_percentage' => isset($item['discount_type']) && $item['discount_type'] === 'percentage'
-                                    ? round((float) ($item['discount_percentage'] ?? 0), 6)
-                                    : null,
-                                'total' => round($lineTotal * $multiplier),
-                                'supplier_price' => round($supplierPrice * $multiplier),
-                                'supplier_total' => round($lineTotal * $multiplier),
-                                'is_preparable' => false,
-                            ];
-                        }, $customVariations);
-
-                        DB::table('sale_variation')->insert($customRows);
+                        $customMultiplier = $sale->currencyMultiplier();
+                        DB::table('sale_variation')->insert(self::buildCustomRows($customVariations, $sale->id, $customMultiplier));
                     }
 
-                    // Save preparable items
-                    $preparableVariations = $state['preparable_variations'] ?? [];
-                    if (! empty($preparableVariations) && is_array($preparableVariations)) {
-                        foreach (array_values($preparableVariations) as $sequence => $preparableVariation) {
-                            $preparableVariationId = $preparableVariation['variation_id'] ?? null;
-                            if (! $preparableVariationId) {
-                                continue;
-                            }
-
-                            $preparableItems = $preparableVariation['preparable_items'] ?? [];
-                            if (! is_array($preparableItems) || empty($preparableItems)) {
-                                continue;
-                            }
-
-                            foreach ($preparableItems as $item) {
-                                $variationId = $item['variation_id'] ?? null;
-                                if (! $variationId) {
-                                    continue;
-                                }
-
-                                // Get discount amount - use discount_amount for percentage discounts, otherwise use disc field
-                                $itemDiscountType = isset($item['discount_type']) ? $item['discount_type'] : 'flat';
-                                $itemDiscountPercentage = $itemDiscountType === 'percentage'
-                                    ? (float) ($item['discount_percentage'] ?? 0)
-                                    : null;
-                                if ($itemDiscountType === 'percentage') {
-                                    $itemDisc = round(($unitPrice * abs($quantity)) * (abs($itemDiscountPercentage) / 100), 2);
-                                    if ($itemDiscountPercentage < 0 || $quantity < 0) {
-                                        $itemDisc = $itemDisc * -1;
-                                    }
-                                } else {
-                                    $discValue = $item['disc'] ?? ($item['discount_amount'] ?? 0);
-                                    if (is_string($discValue) && str_contains($discValue, '%')) {
-                                        $itemDisc = 0;
-                                    } else {
-                                        $itemDisc = (float) $discValue;
-                                    }
-                                }
-
-                                // Get stock_id and calculate supplier price and tax
-                                $stockId = $item['stock_id'] ?? null;
-                                $stock = $stockId ? Stock::find($stockId) : null;
-                                $supplierPrice = $stock ? (float) ($stock->supplier_price ?? 0) : 0;
-                                $quantity = (float) ($item['quantity'] ?? 1);
-                                $unitPrice = round((float) ($item['unit_price'] ?? 0), 2);
-
-                                // Calculate tax similar to regular variations - use effective tax amount (0 if taxes disabled)
-                                $store = Filament::getTenant();
-                                $lineTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
-
-                                SalePreparableItem::create([
-                                    'sale_id' => $sale->id,
-                                    'sequence' => $sequence, // Store sequence to uniquely identify this preparable variation instance
-                                    'preparable_variation_id' => $preparableVariationId,
-                                    'variation_id' => $variationId,
-                                    'stock_id' => $stockId,
-                                    'quantity' => $quantity,
-                                    'unit_price' => $unitPrice,
-                                    'tax' => $lineTax,
-                                    'discount' => round($itemDisc, 2),
-                                    'discount_type' => $itemDiscountType,
-                                    'discount_percentage' => $itemDiscountPercentage,
-                                    'total' => round((float) ($item['total'] ?? 0), 2),
-                                    'supplier_price' => round($supplierPrice, 2),
-                                    'supplier_total' => round($supplierPrice * $quantity, 2),
-                                ]);
-                            }
-                        }
-                    }
+                    self::persistPreparableItems($sale, $state['preparable_variations'] ?? []);
 
                     // Refresh sale to ensure variations are loaded before recalculation
                     $sale->refresh();
@@ -4130,5 +2493,626 @@ class SaleForm
 
         // Otherwise, just go to create page
         return redirect()->to(SaleResource::getUrl('create'));
+    }
+
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /** Common extraAttributes for price input fields (CSS injection). */
+    private static function priceExtraAttributes(): array
+    {
+        return [
+            'class' => 'price-field-wrapper',
+            'x-data' => '{}',
+            'x-init' => "\$nextTick(() => { const styleId = 'price-helper-style'; if (!document.getElementById(styleId)) { const style = document.createElement('style'); style.id = styleId; style.textContent = '.price-field-wrapper .fi-sc-text, .fi-input-wrapper:has(input[data-price-input]) .fi-sc-text { font-size: 0.3rem !important; line-height: 0.35rem !important; opacity: 0.5 !important; margin-top: 0.0625rem !important; color: rgb(107 114 128) !important; }'; document.head.appendChild(style); } })",
+        ];
+    }
+
+    /** Show "1x=N" helper text on a price field when a discount is applied. */
+    private static function priceHelperText(float $unitPrice, float $unitDiscount): ?string
+    {
+        if ($unitDiscount != 0 && $unitPrice > 0) {
+            $after = $unitPrice - abs($unitDiscount);
+            if ($after > 0) {
+                $floor = (int) floor($after);
+                if ($floor > 0) {
+                    return "1x={$floor}";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Show "1x=N" helper text on a discount field when qty > 1 and discount is flat. */
+    private static function discHelperText(float $quantity, mixed $disc): ?string
+    {
+        if (is_string($disc) && str_contains($disc, '%')) {
+            return null;
+        }
+
+        if (abs($quantity) > 1 && $disc !== null && $disc !== '') {
+            $discountAmount = (float) $disc;
+            if ($discountAmount != 0) {
+                $floor = (int) floor(abs($discountAmount) / abs($quantity));
+                if ($floor > 0) {
+                    return "1x={$floor}";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse and apply a discount input (flat amount or "10%") to form state.
+     * Sets discount_type, discount_percentage, discount_amount, unit_discount, and the display field.
+     *
+     * @param  string  $displayField  'discount' for variations, 'disc' for preparable contexts.
+     */
+    private static function applyDiscountInput(mixed $input, float $quantity, float $subtotal, callable $set, string $displayField): void
+    {
+        $inputStr = is_string($input) ? $input : (string) ($input ?? '');
+
+        if (str_contains($inputStr, '%')) {
+            $raw = str_replace('%', '', trim($inputStr));
+            if (! is_numeric($raw)) {
+                $set($displayField, '');
+                $set('discount_type', null);
+                $set('discount_percentage', null);
+
+                return;
+            }
+
+            $pct = (float) $raw;
+            $pct = $quantity < 0
+                ? max(-999.999999, min(999.999999, $pct))
+                : max(0, min(999.999999, $pct));
+            $pct = round($pct, 6);
+
+            $amount = ($subtotal * abs($pct)) / 100;
+            if ($pct < 0 || $quantity < 0) {
+                $amount *= -1;
+            }
+            $amount = round($amount, 2);
+
+            $set('discount_type', 'percentage');
+            $set('discount_percentage', $pct);
+            $set($displayField, self::formatPercentage($pct));
+            $set('discount_amount', $amount);
+            $set('unit_discount', $quantity != 0 ? round($amount / $quantity, 2) : 0);
+        } else {
+            $amount = (float) ($input ?? 0);
+            $amount = $quantity < 0 ? abs($amount) * -1 : max(0, $amount);
+            $amount = round($amount, 2);
+
+            $set('discount_type', 'flat');
+            $set('discount_percentage', null);
+            $set($displayField, self::formatNumberForState($amount));
+            $set('discount_amount', $amount);
+            $set('unit_discount', $quantity != 0 ? round($amount / $quantity, 2) : 0);
+        }
+    }
+
+    /**
+     * Recalculate percentage-discount fields when quantity or price changes.
+     * Updates the display field (percentage format), discount_amount, and unit_discount.
+     */
+    private static function recalcPercentDiscount(float $quantity, float $subtotal, float $percentage, callable $set, string $displayField): void
+    {
+        $amount = ($subtotal * abs($percentage)) / 100;
+        if ($percentage < 0 || $quantity < 0) {
+            $amount *= -1;
+        }
+        $amount = round($amount, 2);
+
+        $set($displayField, self::formatPercentage($percentage));
+        $set('discount_amount', $amount);
+        $set('unit_discount', $quantity != 0 ? round($amount / $quantity, 2) : 0);
+    }
+
+    /**
+     * Sum nested preparable_items totals for the current preparable_variation context.
+     * Called from within a preparable_variations repeater item closure.
+     */
+    private static function getPrepVarItemsTotal(callable $get): float
+    {
+        $preparableVariations = $get('../../preparable_variations') ?? [];
+        $currentVariationId = $get('variation_id');
+        $currentDescription = $get('description');
+        $total = 0.0;
+
+        foreach ($preparableVariations as $variation) {
+            if (($variation['variation_id'] ?? null) == $currentVariationId ||
+                ($variation['description'] ?? null) == $currentDescription) {
+                $items = $variation['preparable_items'] ?? [];
+                if (is_array($items)) {
+                    foreach ($items as $item) {
+                        $total += ((float) ($item['unit_price'] ?? 0) * (float) ($item['quantity'] ?? 1))
+                            - (float) ($item['disc'] ?? 0);
+                    }
+                }
+                break;
+            }
+        }
+
+        return $total;
+    }
+
+    /** Resolve the sale-level discount amount from form state (handles flat and % strings). */
+    private static function resolveSaleDiscountAmount(array $state): float
+    {
+        $discountAmount = isset($state['sale_discount_amount'])
+            ? round((float) $state['sale_discount_amount'], 2)
+            : (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')
+                ? 0
+                : round((float) ($state['discount'] ?? 0), 2));
+
+        if (is_string($state['discount'] ?? null) && str_contains($state['discount'], '%')) {
+            $saleDiscountType = $state['sale_discount_type'] ?? 'flat';
+            $saleDiscountPercentage = (float) ($state['sale_discount_percentage'] ?? 0);
+            if ($saleDiscountType === 'percentage' && $saleDiscountPercentage != 0) {
+                $subtotal = (float) ($state['subtotal'] ?? 0);
+                $discountAmount = round(($subtotal * abs($saleDiscountPercentage)) / 100, 2);
+                if ($saleDiscountPercentage < 0) {
+                    $discountAmount *= -1;
+                }
+            }
+        }
+
+        return $discountAmount;
+    }
+
+    /**
+     * Resolve payment status and method enums from form state.
+     *
+     * @return array{0: SalePaymentStatus, 1: SalePaymentMethod|null}
+     */
+    private static function resolvePaymentEnums(array $state): array
+    {
+        $paymentStatusValue = $state['payment_status'] ?? SalePaymentStatus::default();
+        $paymentStatus = $paymentStatusValue instanceof SalePaymentStatus
+            ? $paymentStatusValue
+            : SalePaymentStatus::from($paymentStatusValue);
+
+        $paymentMethod = null;
+        if ($paymentStatus === SalePaymentStatus::Paid) {
+            $paymentMethodValue = $state['payment_method'] ?? SalePaymentMethod::default();
+            $paymentMethod = $paymentMethodValue instanceof SalePaymentMethod
+                ? $paymentMethodValue
+                : SalePaymentMethod::from($paymentMethodValue);
+        }
+
+        return [$paymentStatus, $paymentMethod];
+    }
+
+    /** Build the common sale attribute array shared between create and update. */
+    private static function buildSaleAttributes(array $state, $status, float $discountAmount, $paymentStatus, $paymentMethod): array
+    {
+        return [
+            'customer_id' => $state['customer_id'] ?? null,
+            'payment_status' => $paymentStatus,
+            'payment_method' => $paymentMethod,
+            'use_fbr' => $state['use_fbr'] ?? false,
+            'status' => $status,
+            'discount' => $discountAmount,
+            'discount_type' => $state['sale_discount_type'] ?? 'flat',
+            'discount_percentage' => isset($state['sale_discount_type']) && $state['sale_discount_type'] === 'percentage'
+                ? round((float) ($state['sale_discount_percentage'] ?? 0), 6)
+                : null,
+            'freight_fare' => round((float) ($state['freight_fare'] ?? 0), 2),
+            'note' => $state['header_note'] ?? null,
+            'header_note' => $state['header_note'] ?? null,
+            'footer_note' => $state['footer_note'] ?? null,
+        ];
+    }
+
+    /** Build DB rows for regular (non-preparable, non-custom) variations. */
+    private static function buildVariationRows(array $regularVariations, int $saleId, float $multiplier, ?object $store = null): array
+    {
+        $rows = [];
+        foreach ($regularVariations as $variation) {
+            $discountValue = isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
+                ? (float) ($variation['discount_amount'] ?? 0)
+                : (float) ($variation['discount'] ?? 0);
+
+            $taxValue = (float) ($variation['tax'] ?? 0);
+            if ($taxValue == 0 && $store?->tax_enabled && isset($variation['stock_id']) && $variation['stock_id']) {
+                $stock = Stock::find($variation['stock_id']);
+                if ($stock) {
+                    $unitPrice = (float) ($variation['unit_price'] ?? 0);
+                    $taxValue = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
+                }
+            }
+
+            $rows[] = [
+                'sale_id' => $saleId,
+                'variation_id' => $variation['variation_id'],
+                'stock_id' => $variation['stock_id'] ?? null,
+                'description' => $variation['description'],
+                'quantity' => $variation['quantity'],
+                'unit_price' => round((float) $variation['unit_price'] * $multiplier),
+                'tax' => round($taxValue * $multiplier),
+                'discount' => round($discountValue * $multiplier),
+                'discount_type' => $variation['discount_type'] ?? 'flat',
+                'discount_percentage' => isset($variation['discount_type']) && $variation['discount_type'] === 'percentage'
+                    ? round((float) ($variation['discount_percentage'] ?? 0), 6)
+                    : null,
+                'total' => round((float) $variation['total'] * $multiplier),
+                'supplier_price' => round((float) $variation['supplier_price'] * $multiplier),
+                'supplier_total' => round((float) $variation['supplier_price'] * $variation['quantity'] * $multiplier),
+                'is_preparable' => false,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** Build DB rows for custom (no variation_id) sale items. */
+    private static function buildCustomRows(array $customVariations, int $saleId, float $multiplier): array
+    {
+        return array_map(function ($item) use ($saleId, $multiplier) {
+            $discountValue = isset($item['discount_type']) && $item['discount_type'] === 'percentage'
+                ? (float) ($item['discount_amount'] ?? 0)
+                : (float) ($item['discount'] ?? 0);
+
+            $quantity = (float) ($item['quantity'] ?? 0);
+            $lineTotal = (float) ($item['total'] ?? 0);
+            $supplierPrice = $quantity != 0 ? $lineTotal / $quantity : 0.0;
+
+            return [
+                'sale_id' => $saleId,
+                'variation_id' => null,
+                'stock_id' => null,
+                'description' => $item['description'] ?? 'Custom item',
+                'quantity' => $quantity,
+                'unit_price' => round((float) ($item['unit_price'] ?? 0) * $multiplier),
+                'tax' => round((float) ($item['tax'] ?? 0) * $multiplier),
+                'discount' => round($discountValue * $multiplier),
+                'discount_type' => $item['discount_type'] ?? 'flat',
+                'discount_percentage' => isset($item['discount_type']) && $item['discount_type'] === 'percentage'
+                    ? round((float) ($item['discount_percentage'] ?? 0), 6)
+                    : null,
+                'total' => round($lineTotal * $multiplier),
+                'supplier_price' => round($supplierPrice * $multiplier),
+                'supplier_total' => round($lineTotal * $multiplier),
+                'is_preparable' => false,
+            ];
+        }, $customVariations);
+    }
+
+    /** Delete and re-insert all SalePreparableItems for a sale. */
+    private static function persistPreparableItems(Sale $sale, array $preparableVariations): void
+    {
+        SalePreparableItem::where('sale_id', $sale->id)->delete();
+
+        if (empty($preparableVariations)) {
+            return;
+        }
+
+        foreach (array_values($preparableVariations) as $sequence => $preparableVariation) {
+            $preparableVariationId = $preparableVariation['variation_id'] ?? null;
+            if (! $preparableVariationId) {
+                continue;
+            }
+
+            $preparableItems = $preparableVariation['preparable_items'] ?? [];
+            if (! is_array($preparableItems) || empty($preparableItems)) {
+                continue;
+            }
+
+            foreach ($preparableItems as $item) {
+                $variationId = $item['variation_id'] ?? null;
+                if (! $variationId) {
+                    continue;
+                }
+
+                $itemDiscountType = $item['discount_type'] ?? 'flat';
+                $itemDiscountPercentage = $itemDiscountType === 'percentage'
+                    ? (float) ($item['discount_percentage'] ?? 0)
+                    : null;
+
+                $quantity = (float) ($item['quantity'] ?? 1);
+                $unitPrice = round((float) ($item['unit_price'] ?? 0), 2);
+
+                if ($itemDiscountType === 'percentage') {
+                    $itemDisc = round(($unitPrice * abs($quantity)) * (abs($itemDiscountPercentage) / 100), 2);
+                    if ($itemDiscountPercentage < 0 || $quantity < 0) {
+                        $itemDisc *= -1;
+                    }
+                } else {
+                    $discValue = $item['disc'] ?? ($item['discount_amount'] ?? 0);
+                    $itemDisc = is_string($discValue) && str_contains($discValue, '%') ? 0 : (float) $discValue;
+                }
+
+                $stockId = $item['stock_id'] ?? null;
+                $stock = $stockId ? Stock::find($stockId) : null;
+                $supplierPrice = $stock ? (float) ($stock->supplier_price ?? 0) : 0;
+                $store = Filament::getTenant();
+                $lineTax = app(CoreStoreSettingsService::class)->getEffectiveTaxAmount($store, $stock, $unitPrice);
+
+                SalePreparableItem::create([
+                    'sale_id' => $sale->id,
+                    'sequence' => $sequence,
+                    'preparable_variation_id' => $preparableVariationId,
+                    'variation_id' => $variationId,
+                    'stock_id' => $stockId,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'tax' => $lineTax,
+                    'discount' => round($itemDisc, 2),
+                    'discount_type' => $itemDiscountType,
+                    'discount_percentage' => $itemDiscountPercentage,
+                    'total' => round((float) ($item['total'] ?? 0), 2),
+                    'supplier_price' => round($supplierPrice, 2),
+                    'supplier_total' => round($supplierPrice * $quantity, 2),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Handle preparable_product_search.afterStateUpdated: resolve which preparable variation
+     * the nested item belongs to (via instance_id, items match, or variation_id fallbacks),
+     * then add/increment the item and update the form state.
+     */
+    private static function handlePreparableProductSearch(mixed $state, callable $set, callable $get): void
+    {
+        if (! $state) {
+            return;
+        }
+
+        $barcode = Stock::query()->with(['variation.product'])->find($state);
+        if (! $barcode || ! $barcode->variation) {
+            Notification::make()->title('Product not found')->danger()->duration(1000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        $variation = $barcode->variation;
+        if (! ($variation instanceof Variation)) {
+            Notification::make()->title('Product variation not found')->danger()->duration(1000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        $variation = Variation::find($variation->id);
+        if (! $variation) {
+            Notification::make()->title('Product variation not found')->danger()->duration(1000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        if ($variation->product?->is_preparable) {
+            Notification::make()->title('Preparable products cannot be added as nested items')->danger()->duration(2000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        $preparableVariations = $get('../../preparable_variations') ?? [];
+        if (empty($preparableVariations)) {
+            Notification::make()->title('Please add a preparable product first')->warning()->duration(2000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        // Resolve current index via instance_id → items-match → variation_id fallbacks
+        $currentIndex = null;
+        $currentInstanceId = $get('instance_id') ?? $get('../instance_id');
+
+        if ($currentInstanceId) {
+            foreach ($preparableVariations as $index => $pv) {
+                if (($pv['instance_id'] ?? null) == $currentInstanceId) {
+                    $currentIndex = $index;
+                    break;
+                }
+            }
+        }
+
+        if ($currentIndex === null) {
+            try {
+                $preparableItems = $get('../preparable_items') ?? [];
+                if (! is_array($preparableItems)) {
+                    $preparableItems = [];
+                }
+            } catch (\Exception) {
+                $preparableItems = [];
+            }
+            foreach ($preparableVariations as $index => $pv) {
+                $pvItems = is_array($pv['preparable_items'] ?? null) ? $pv['preparable_items'] : [];
+                if (count($preparableItems) !== count($pvItems)) {
+                    continue;
+                }
+                $matches = true;
+                foreach ($preparableItems as $ci) {
+                    $found = false;
+                    foreach ($pvItems as $vi) {
+                        if (($ci['variation_id'] ?? null) == ($vi['variation_id'] ?? null) &&
+                            ($ci['stock_id'] ?? null) == ($vi['stock_id'] ?? null)) {
+                            $found = true;
+                            break;
+                        }
+                    }
+                    if (! $found) {
+                        $matches = false;
+                        break;
+                    }
+                }
+                if ($matches) {
+                    $currentIndex = $index;
+                    break;
+                }
+            }
+        }
+
+        if ($currentIndex === null) {
+            $currentVariationId = $get('variation_id') ?? $get('../variation_id');
+            $currentDescription = $get('description') ?? $get('../description');
+            if ($currentVariationId && $currentDescription) {
+                foreach ($preparableVariations as $index => $pv) {
+                    if (($pv['variation_id'] ?? null) == $currentVariationId &&
+                        ($pv['description'] ?? null) == $currentDescription &&
+                        empty($pv['preparable_items'] ?? [])) {
+                        $currentIndex = $index;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($currentIndex === null) {
+            Notification::make()->title('Could not identify preparable variation')->body('Please try adding the item again.')->warning()->duration(2000)->send();
+            $set('preparable_product_search', null);
+
+            return;
+        }
+
+        $preparableItems = is_array($preparableVariations[$currentIndex]['preparable_items'] ?? null)
+            ? $preparableVariations[$currentIndex]['preparable_items']
+            : [];
+
+        $found = false;
+        foreach ($preparableItems as &$item) {
+            if (($item['variation_id'] ?? null) == $variation->id) {
+                $item['quantity'] = round(($item['quantity'] ?? 1) + 1, 4);
+                $unitDiscount = (float) ($item['unit_discount'] ?? 0);
+                $item['disc'] = self::formatNumberForState($unitDiscount * $item['quantity']);
+                $item['total'] = round(($item['unit_price'] * $item['quantity']) - $item['disc'], 2);
+                if (! isset($item['item_id'])) {
+                    $item['item_id'] = self::makeDraftPreparableItemId($item['variation_id'] ?? null, $item['stock_id'] ?? null, $preparableItems);
+                }
+                $found = true;
+                break;
+            }
+        }
+        unset($item);
+
+        if (! $found) {
+            $desc = $variation->brand_name
+                ? $variation->sku.' - '.$variation->brand_name.' - '.$variation->description
+                : $variation->sku.' - '.$variation->description;
+            $basePrice = $variation->price ?? 0;
+            $salePrice = $variation->sale_price ?? $basePrice;
+            $disc = round($basePrice - $salePrice, 2);
+            $preparableItems[] = [
+                'item_id' => self::makeDraftPreparableItemId($variation->id, $barcode->id, $preparableItems),
+                'variation_id' => $variation->id,
+                'stock_id' => $barcode->id,
+                'description' => $desc,
+                'quantity' => 1,
+                'unit_price' => round($basePrice, 2),
+                'unit_discount' => $disc,
+                'disc' => $disc,
+                'total' => round($salePrice, 2),
+            ];
+        }
+
+        $preparableVariations[$currentIndex]['preparable_items'] = array_values($preparableItems);
+        $set('../../preparable_variations', array_values($preparableVariations));
+        SaleForm::recalcPreparableVariationLine($get, $set, '../../preparable_variations');
+        $set('preparable_product_search', null);
+        Notification::make()->title('Product added to preparable items')->success()->duration(1000)->send();
+    }
+
+    /**
+     * Handle preparable_items Repeater.afterStateUpdated: ensure all items have item_id,
+     * recalculate the parent preparable variation total, then refresh the summary.
+     */
+    private static function handlePreparableItemsUpdate(mixed $state, callable $set, callable $get): void
+    {
+        if (is_array($state)) {
+            $updated = false;
+            foreach ($state as &$item) {
+                if (empty($item['item_id'] ?? null)) {
+                    $item['item_id'] = self::makeDraftPreparableItemId(
+                        $item['variation_id'] ?? null,
+                        $item['stock_id'] ?? null,
+                        $state,
+                    );
+                    $updated = true;
+                }
+            }
+            unset($item);
+            if ($updated) {
+                $set('../preparable_items', array_values($state));
+            }
+        }
+
+        $preparableVariations = $get('../../preparable_variations') ?? [];
+        $parentInstanceId = $get('../../instance_id');
+        $parentVariationId = $get('../../variation_id');
+        $parentDescription = $get('../../description');
+        $onlyOne = count($preparableVariations) === 1;
+
+        $foundIndex = null;
+        $calculatedTotal = null;
+
+        if (! empty($preparableVariations) && is_array($preparableVariations)) {
+            foreach ($preparableVariations as $index => &$variation) {
+                $isParent = ($parentInstanceId && ($variation['instance_id'] ?? null) == $parentInstanceId)
+                    || ($parentVariationId && ($variation['variation_id'] ?? null) == $parentVariationId)
+                    || ($parentDescription && ($variation['description'] ?? null) == $parentDescription)
+                    || $onlyOne;
+
+                if (! $isParent) {
+                    continue;
+                }
+
+                $foundIndex = $index;
+                $preparableItems = is_array($state) ? $state : [];
+                $itemsTotal = 0;
+                foreach ($preparableItems as $item) {
+                    $itemDiscountType = $item['discount_type'] ?? 'flat';
+                    $itemDisc = $itemDiscountType === 'percentage'
+                        ? (float) ($item['discount_amount'] ?? 0)
+                        : (is_string($item['disc'] ?? null) && str_contains((string) ($item['disc'] ?? ''), '%')
+                            ? 0
+                            : (float) ($item['disc'] ?? 0));
+                    $itemsTotal += ((float) ($item['unit_price'] ?? 0) * (float) ($item['quantity'] ?? 1)) - $itemDisc;
+                }
+
+                $prepQty = (float) ($variation['qty'] ?? 1);
+                $prepPrice = (float) ($variation['price'] ?? 0);
+                $prepDiscType = $variation['discount_type'] ?? 'flat';
+                $prepDisc = $prepDiscType === 'percentage'
+                    ? (float) ($variation['discount_amount'] ?? 0)
+                    : (is_string($variation['disc'] ?? null) && str_contains((string) ($variation['disc'] ?? ''), '%')
+                        ? 0
+                        : (float) ($variation['disc'] ?? 0));
+
+                $calculatedTotal = round((($prepPrice + $itemsTotal) * $prepQty) - $prepDisc, 2);
+                $variation['total'] = $calculatedTotal;
+                $variation['preparable_items'] = array_values($preparableItems);
+                $set('../../preparable_variations', array_values($preparableVariations));
+                $set('../../total', $calculatedTotal);
+                break;
+            }
+            unset($variation);
+        }
+
+        SaleForm::recalcSummary(
+            $get, $set,
+            '../../../../variations',
+            '../../preparable_variations',
+            'preparable_items',
+            '../../../../subtotal',
+            '../../../../total',
+            '../../../../total_tax',
+            '../../../../discount',
+            '../../../../freight_fare'
+        );
+
+        if ($foundIndex !== null && $calculatedTotal !== null) {
+            $final = $get('../../preparable_variations') ?? [];
+            if (isset($final[$foundIndex])) {
+                $final[$foundIndex]['total'] = $calculatedTotal;
+                $set('../../preparable_variations', array_values($final));
+                $set('../../total', $calculatedTotal);
+            }
+        }
     }
 }
