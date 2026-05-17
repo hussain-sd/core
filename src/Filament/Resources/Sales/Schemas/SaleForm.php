@@ -2329,6 +2329,12 @@ class SaleForm
                             $newTotal = $sale->total;
                         });
 
+                        // withoutEvents silenced every observer — including the
+                        // cloud-sync observer on the POS that flips sync_state
+                        // to 'pending'. Without this manual nudge the row stays
+                        // 'synced' and the push job never picks the edit up.
+                        self::flagForCloudPush($sale);
+
                         // Now handle all transactions manually (prevents observer conflicts)
                         $saleTransactionService = app(SaleTransactionService::class);
                         $saleTransactionService->handleSaleEdit(
@@ -2733,6 +2739,72 @@ class SaleForm
         $exists = \SmartTill\Core\Models\Customer::query()->whereKey($id)->exists();
 
         return $exists ? $id : null;
+    }
+
+    /**
+     * Mark a Sale row as needing a cloud push and dispatch a push-only sync
+     * job. Called after the Sale::withoutEvents() edit path so the cloud
+     * observer (which would normally flip sync_state on Eloquent's
+     * `updated` event) still gets its job done.
+     *
+     * Safe to call on the server (no sync columns, no jobs class) — every
+     * branch is guarded by existence checks so the same form code can run
+     * on cloud and POS without divergence.
+     */
+    private static function flagForCloudPush(Sale $sale): void
+    {
+        $table = $sale->getTable();
+        $storeId = (int) ($sale->store_id ?? 0);
+        $saleId = (int) ($sale->getKey() ?? 0);
+
+        if ($saleId <= 0) {
+            return;
+        }
+
+        // Skip if this build doesn't have the cloud-sync columns at all
+        // (i.e., the SaaS server, where sales is the source of truth).
+        if (! \Illuminate\Support\Facades\Schema::hasColumn($table, 'sync_state')) {
+            return;
+        }
+
+        $updates = ['sync_state' => 'pending'];
+        if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'sync_error')) {
+            $updates['sync_error'] = null;
+        }
+
+        \Illuminate\Support\Facades\DB::table($table)->where('id', $saleId)->update($updates);
+
+        // Also mark the child line items so any field-level edits flow up
+        // (the line items themselves are re-inserted with default pending
+        // status, but if the form only changed parent fields we still need
+        // sale_variation/sale_preparable_items to be re-evaluated).
+        foreach (['sale_variation', 'sale_preparable_items'] as $childTable) {
+            if (\Illuminate\Support\Facades\Schema::hasTable($childTable)
+                && \Illuminate\Support\Facades\Schema::hasColumn($childTable, 'sync_state')
+            ) {
+                $childUpdates = ['sync_state' => 'pending'];
+                if (\Illuminate\Support\Facades\Schema::hasColumn($childTable, 'sync_error')) {
+                    $childUpdates['sync_error'] = null;
+                }
+
+                \Illuminate\Support\Facades\DB::table($childTable)
+                    ->where('sale_id', $saleId)
+                    ->update($childUpdates);
+            }
+        }
+
+        // Trigger the POS-side push job immediately. ShouldBeUnique dedupes
+        // against the auto-sync poller so we don't end up with two jobs.
+        $jobClass = '\\App\\Jobs\\SyncCloudStoreData';
+        if ($storeId > 0 && class_exists($jobClass)) {
+            try {
+                $jobClass::dispatch($storeId, 'push', 'sales');
+            } catch (\Throwable $throwable) {
+                // Dispatch failure isn't fatal — the auto-sync poller will
+                // pick the rows up on its next run (within ~2 min).
+                \Illuminate\Support\Facades\Log::warning('flagForCloudPush dispatch failed: '.$throwable->getMessage());
+            }
+        }
     }
 
     /** Build DB rows for regular (non-preparable, non-custom) variations. */
